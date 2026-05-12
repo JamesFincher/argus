@@ -1,0 +1,39 @@
+{
+  "streams": [
+    {
+      "name": "stream:raw:macos",
+      "consumer_groups": ["cg-perception"],
+      "retention": "24h"
+    },
+    {
+      "name": "stream:raw:ios",
+      "consumer_groups": ["cg-perception"],
+      "retention": "24h"
+    },
+    {
+      "name": "stream:raw:watchos",
+      "consumer_groups": ["cg-perception"],
+      "retention": "24h"
+    },
+    {
+      "name": "stream:derived:notes",
+      "consumer_groups": ["cg-storage", "cg-hermes"],
+      "retention": "30d"
+    },
+    {
+      "name": "stream:policy:blocked",
+      "consumer_groups": ["cg-audit"],
+      "retention": "30d"
+    },
+    {
+      "name": "stream:system:metrics",
+      "consumer_groups": ["cg-monitoring"],
+      "retention": "7d"
+    },
+    {
+      "name": "stream:dlq",
+      "consumer_groups": ["cg-ops"],
+      "retention": "30d"
+    }
+  ]
+}
