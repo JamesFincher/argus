@@ -96,4 +96,69 @@ public enum ArgusEventFactory {
             sensitivity: .low
         )
     }
+
+    public static func userShare(
+        sourceApp: String?,
+        contentType: String,
+        title: String?,
+        url: String?,
+        text: String?,
+        source: String = "ios.share_extension"
+    ) -> ArgusEventEnvelope {
+        let filter = ArgusPrivacyFilter()
+        let summary = [
+            title.map { "title=\($0)" },
+            url.map { "url=\($0)" },
+            text.map { "text=\($0)" }
+        ].compactMap { $0 }.joined(separator: ", ")
+        let result = filter.redact("User shared \(contentType): \(summary)")
+
+        return ArgusEventEnvelope(
+            platform: .iOS,
+            source: source,
+            kind: .userShare,
+            summary: result.text,
+            payload: [
+                "source_app": sourceApp.map(ArgusJSONValue.string) ?? .null,
+                "content_type": .string(contentType),
+                "title": title.map(ArgusJSONValue.string) ?? .null,
+                "url": url.map(ArgusJSONValue.string) ?? .null,
+                "has_text": .bool(text?.isEmpty == false)
+            ],
+            sensitivity: result.sensitivity,
+            redactionsApplied: result.redactionsApplied,
+            rawReference: text?.isEmpty == false ? "local-ios-share-extension" : nil
+        )
+    }
+
+    public static func healthAggregate(
+        metric: String,
+        value: Double,
+        unit: String,
+        intervalStart: Date,
+        intervalEnd: Date,
+        source: String = "watchos.healthkit"
+    ) -> ArgusEventEnvelope {
+        ArgusEventEnvelope(
+            platform: .watchOS,
+            source: source,
+            kind: .healthSignal,
+            summary: "Health aggregate: \(metric) \(value) \(unit)",
+            payload: [
+                "metric": .string(metric),
+                "value": .double(value),
+                "unit": .string(unit),
+                "interval_start": .string(Self.iso8601(intervalStart)),
+                "interval_end": .string(Self.iso8601(intervalEnd)),
+                "aggregate_only": .bool(true)
+            ],
+            sensitivity: .medium,
+            redactionsApplied: [],
+            rawReference: nil
+        )
+    }
+
+    private static func iso8601(_ date: Date) -> String {
+        ISO8601DateFormatter().string(from: date)
+    }
 }

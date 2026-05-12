@@ -206,6 +206,45 @@ final class ArgusCoreTests: XCTestCase {
         XCTAssertTrue(ready.canUseScreenFallback)
     }
 
+    func testIOSUserShareFactoryRedactsUserSelectedText() {
+        let event = ArgusEventFactory.userShare(
+            sourceApp: "com.apple.mobilesafari",
+            contentType: "url",
+            title: "Account",
+            url: "https://example.com/account",
+            text: "Email james@example.com token sk_test_1234567890abcdef"
+        )
+
+        XCTAssertEqual(event.platform, .iOS)
+        XCTAssertEqual(event.kind, .userShare)
+        XCTAssertEqual(event.sensitivity, .high)
+        XCTAssertFalse(event.summary.contains("james@example.com"))
+        XCTAssertFalse(event.summary.contains("sk_test_1234567890abcdef"))
+        XCTAssertTrue(event.summary.contains("[REDACTED_EMAIL]"))
+        XCTAssertEqual(event.payload["source_app"], .string("com.apple.mobilesafari"))
+        XCTAssertEqual(event.payload["has_text"], .bool(true))
+        XCTAssertEqual(event.rawReference, "local-ios-share-extension")
+    }
+
+    func testWatchHealthAggregateFactoryKeepsAggregateOnlyPayload() {
+        let start = Date(timeIntervalSince1970: 100)
+        let end = Date(timeIntervalSince1970: 200)
+        let event = ArgusEventFactory.healthAggregate(
+            metric: "steps",
+            value: 1234,
+            unit: "count",
+            intervalStart: start,
+            intervalEnd: end
+        )
+
+        XCTAssertEqual(event.platform, .watchOS)
+        XCTAssertEqual(event.kind, .healthSignal)
+        XCTAssertEqual(event.sensitivity, .medium)
+        XCTAssertEqual(event.payload["metric"], .string("steps"))
+        XCTAssertEqual(event.payload["aggregate_only"], .bool(true))
+        XCTAssertNil(event.rawReference)
+    }
+
     func testAppLifecycleFactoryEmitsNSWorkspaceLifecycleEvent() {
         let event = ArgusEventFactory.appLifecycle(
             bundleID: "com.apple.Safari",
