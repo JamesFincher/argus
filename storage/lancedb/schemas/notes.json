@@ -1,0 +1,19 @@
+{
+  "table": "argus_notes",
+  "description": "Derived perception notes for local retrieval. Raw event payloads stay in policy-gated stores.",
+  "embedding_model": "local-configured",
+  "columns": [
+    {"name": "note_id", "type": "string", "nullable": false},
+    {"name": "source_event_ids", "type": "list<string>", "nullable": false},
+    {"name": "summary", "type": "string", "nullable": false},
+    {"name": "sensitivity", "type": "string", "nullable": false},
+    {"name": "redactions_applied", "type": "list<string>", "nullable": false},
+    {"name": "observed_at", "type": "timestamp", "nullable": false},
+    {"name": "embedding", "type": "fixed_size_list<float32>", "dimension": 768, "nullable": false}
+  ],
+  "policy": {
+    "raw_payloads_allowed": false,
+    "blocked_sensitivity_excluded": true,
+    "top_k_default": 5
+  }
+}
