@@ -6,6 +6,14 @@ struct MacPermissionSnapshot: Equatable {
     var accessibilityTrusted: Bool
     var screenRecordingGranted: Bool
 
+    var onboardingState: PermissionOnboardingState {
+        PermissionOnboardingState(
+            notificationsGranted: true,
+            accessibilityTrusted: accessibilityTrusted,
+            screenRecordingGranted: screenRecordingGranted
+        )
+    }
+
     static func current(promptAccessibility: Bool = false) -> MacPermissionSnapshot {
         let accessibilityTrusted = AXIsProcessTrustedWithOptions([
             "AXTrustedCheckOptionPrompt": promptAccessibility

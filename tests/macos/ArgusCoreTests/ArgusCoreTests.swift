@@ -171,6 +171,41 @@ final class ArgusCoreTests: XCTestCase {
         XCTAssertEqual(event.payload["scope"], .string("macos"))
     }
 
+    func testPermissionOnboardingOrdersAccessibilityBeforeScreenRecordingFallback() {
+        XCTAssertEqual(
+            PermissionOnboardingState(
+                notificationsGranted: false,
+                accessibilityTrusted: false,
+                screenRecordingGranted: false
+            ).nextStep,
+            .notifications
+        )
+        XCTAssertEqual(
+            PermissionOnboardingState(
+                notificationsGranted: true,
+                accessibilityTrusted: false,
+                screenRecordingGranted: false
+            ).nextStep,
+            .accessibility
+        )
+        let needsScreen = PermissionOnboardingState(
+            notificationsGranted: true,
+            accessibilityTrusted: true,
+            screenRecordingGranted: false
+        )
+        XCTAssertEqual(needsScreen.nextStep, .screenRecording)
+        XCTAssertTrue(needsScreen.canCollectStructuralSignals)
+        XCTAssertFalse(needsScreen.canUseScreenFallback)
+
+        let ready = PermissionOnboardingState(
+            notificationsGranted: true,
+            accessibilityTrusted: true,
+            screenRecordingGranted: true
+        )
+        XCTAssertEqual(ready.nextStep, .ready)
+        XCTAssertTrue(ready.canUseScreenFallback)
+    }
+
     func testAppLifecycleFactoryEmitsNSWorkspaceLifecycleEvent() {
         let event = ArgusEventFactory.appLifecycle(
             bundleID: "com.apple.Safari",

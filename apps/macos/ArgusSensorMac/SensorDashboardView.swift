@@ -23,10 +23,13 @@ struct SensorDashboardView: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text(ArgusBrand.sensorName)
                     .font(.system(size: 30, weight: .semibold))
-                Text(model.status)
-                    .font(.callout)
-                    .foregroundStyle(model.isPaused ? Color.secondary : Color.green)
-            }
+            Text(model.status)
+                .font(.callout)
+                .foregroundStyle(model.isPaused ? Color.secondary : Color.green)
+            Text(onboardingText)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
 
             Spacer()
 
@@ -97,6 +100,19 @@ struct SensorDashboardView: View {
                 }
                 .listStyle(.inset)
             }
+        }
+    }
+
+    private var onboardingText: String {
+        switch model.permissionSnapshot.onboardingState.nextStep {
+        case .notifications:
+            return "Next permission: Notifications"
+        case .accessibility:
+            return "Next permission: Accessibility"
+        case .screenRecording:
+            return "Next permission: Screen Recording"
+        case .ready:
+            return "Permissions ready"
         }
     }
 }
