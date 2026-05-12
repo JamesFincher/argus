@@ -47,3 +47,39 @@ def test_raw_fetch_requires_token_for_high_sensitivity_event():
     assert "Bearer abcdefghijklmnopqrstuvwxyz" in allowed["event"]["payload"]["text"]
     assert redacted["ok"] is True
     assert "[REDACTED_BEARER_TOKEN]" in redacted["event"]["payload"]["text"]
+
+
+def test_raw_fetch_audits_actor_scope_count_and_redactions():
+    store = InMemoryEventStore()
+    event = store.add(
+        make_event(
+            "activity.focused_field",
+            {"text": "Bearer abcdefghijklmnopqrstuvwxyz"},
+        )
+    )
+    server = LocalMCPServer(store=store, policy=RedactionPolicy(approval_token="approve"))
+
+    blocked = server.call_tool(
+        "sensor_expand_event",
+        event_id=event.event_id,
+        raw_mode="full",
+        actor="hermes-session-1",
+    )
+    redacted = server.call_tool(
+        "sensor_expand_event",
+        event_id=event.event_id,
+        actor="hermes-session-1",
+    )
+
+    assert blocked["ok"] is False
+    assert redacted["ok"] is True
+    records = server.audit_log.records
+    assert records[0].actor == "hermes-session-1"
+    assert records[0].tool == "sensor_expand_event"
+    assert records[0].scope == "full"
+    assert records[0].event_count == 1
+    assert records[0].allowed is False
+    assert "requires valid approval token" in records[0].reason
+    assert records[1].scope == "redacted"
+    assert records[1].allowed is True
+    assert records[1].redactions_applied == ["bearer_token"]

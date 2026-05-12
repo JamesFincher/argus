@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .audit import InMemoryAuditLog
 from .mcp import LocalMCPServer
 from .policy import RedactionPolicy
 from .store import InMemoryEventStore
@@ -14,6 +15,7 @@ def register(
     *,
     store: InMemoryEventStore | None = None,
     policy: RedactionPolicy | None = None,
+    audit_log: InMemoryAuditLog | None = None,
     approval_token: str | None = None,
 ) -> dict[str, Any]:
     """Register Hermes hooks.
@@ -23,10 +25,14 @@ def register(
     """
 
     effective_policy = policy or RedactionPolicy(approval_token=approval_token)
-    server = LocalMCPServer(store=store or InMemoryEventStore(), policy=effective_policy)
+    server = LocalMCPServer(
+        store=store or InMemoryEventStore(),
+        policy=effective_policy,
+        audit_log=audit_log,
+    )
 
     def pre_llm_call(session_id: str | None = None, **_: Any) -> dict[str, str]:
-        return server.call_tool("sensor_get_recent_notes", limit=5)
+        return server.call_tool("sensor_get_recent_notes", limit=5, actor=session_id or "hermes")
 
     def pre_tool_call(
         tool_name: str | None = None,

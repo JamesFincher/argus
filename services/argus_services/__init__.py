@@ -1,5 +1,6 @@
 """Argus service primitives for local Hermes integration."""
 
+from .audit import AuditRecord, InMemoryAuditLog
 from .events import EventEnvelope, Redaction, Relationship, make_event
 from .event_gateway import EventGateway
 from .hermes_plugin import register
@@ -10,9 +11,11 @@ from .store import InMemoryEventStore
 from .streams import RedisStreamPublisher, stream_for_event
 
 __all__ = [
+    "AuditRecord",
     "EventEnvelope",
     "EventGateway",
     "InMemoryEventStore",
+    "InMemoryAuditLog",
     "LocalMCPServer",
     "PerceptionOutput",
     "PerceptionWorker",

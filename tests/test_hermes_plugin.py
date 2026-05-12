@@ -43,3 +43,16 @@ def test_hermes_hook_registration_and_behavior():
 
     assert blocked["block"] is True
     assert allowed is None
+
+
+def test_hermes_pre_llm_context_records_audit_actor():
+    ctx = FakeHermesContext()
+    result = register(ctx)
+
+    ctx.hooks["pre_llm_call"](session_id="session-123")
+
+    audit = result["server"].audit_log.records
+    assert len(audit) == 1
+    assert audit[0].actor == "session-123"
+    assert audit[0].tool == "sensor_get_recent_notes"
+    assert audit[0].scope == "recent_notes"
