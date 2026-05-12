@@ -22,6 +22,20 @@ def test_summary_retrieval_returns_redacted_context():
     assert "[REDACTED_EMAIL]" in result["context"]
 
 
+def test_mcp_discovery_exposes_spec_tools():
+    server = LocalMCPServer()
+    tool_names = {tool["name"] for tool in server.list_tools()}
+
+    assert {
+        "sensor_timeline_search",
+        "sensor_get_recent_notes",
+        "sensor_expand_event",
+        "sensor_pause_scope",
+        "sensor_forget_scope",
+        "sensor_export_session_brief",
+    } <= tool_names
+
+
 def test_raw_fetch_requires_token_for_high_sensitivity_event():
     store = InMemoryEventStore()
     event = store.add(
@@ -83,3 +97,22 @@ def test_raw_fetch_audits_actor_scope_count_and_redactions():
     assert records[1].scope == "redacted"
     assert records[1].allowed is True
     assert records[1].redactions_applied == ["bearer_token"]
+
+
+def test_timeline_search_returns_redacted_matches():
+    store = InMemoryEventStore()
+    store.add(
+        make_event(
+            "perception.note",
+            {"summary": "Pricing discussion with alex@example.com"},
+        )
+    )
+    server = LocalMCPServer(store=store, policy=RedactionPolicy())
+
+    result = server.call_tool("sensor_timeline_search", query="pricing", actor="hermes")
+
+    assert result["ok"] is True
+    assert len(result["matches"]) == 1
+    assert "alex@example.com" not in result["matches"][0]["summary"]
+    assert "[REDACTED_EMAIL]" in result["matches"][0]["summary"]
+    assert server.audit_log.records[-1].tool == "sensor_timeline_search"

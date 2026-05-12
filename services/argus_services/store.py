@@ -32,12 +32,15 @@ class InMemoryEventStore:
         notes = []
         for event in self.recent(limit=limit):
             redacted = policy.redact_event(event)
-            summary = _event_summary(redacted)
+            summary = self.summary_for(redacted)
             if summary:
                 notes.append(f"- {summary}")
         if not notes:
             return "Recent ambient context: no local sensor notes available."
         return "Recent ambient context:\n" + "\n".join(notes)
+
+    def summary_for(self, event: EventEnvelope) -> str:
+        return _event_summary(event)
 
 
 def _event_summary(event: EventEnvelope) -> str:

@@ -76,6 +76,26 @@ class LocalMCPServer:
             "Fetch a redacted event or gated raw event by event_id.",
             self.sensor_expand_event,
         )
+        self.registry.register(
+            "sensor_timeline_search",
+            "Search local Argus timeline summaries without exposing raw payloads.",
+            self.sensor_timeline_search,
+        )
+        self.registry.register(
+            "sensor_pause_scope",
+            "Record an operator request to pause a local sensing scope.",
+            self.sensor_pause_scope,
+        )
+        self.registry.register(
+            "sensor_forget_scope",
+            "Record an operator request to forget local data for a scope.",
+            self.sensor_forget_scope,
+        )
+        self.registry.register(
+            "sensor_export_session_brief",
+            "Export a concise redacted session brief from recent local events.",
+            self.sensor_export_session_brief,
+        )
 
     def sensor_get_recent_notes(self, limit: int = 5, actor: str = "hermes") -> dict[str, Any]:
         events = self.store.recent(limit=limit)
@@ -171,3 +191,86 @@ class LocalMCPServer:
             "event": redacted.to_dict(),
             "raw_mode": "redacted",
         }
+
+    def sensor_timeline_search(
+        self,
+        query: str,
+        limit: int = 10,
+        actor: str = "hermes",
+    ) -> dict[str, Any]:
+        query_lower = query.lower()
+        matches = []
+        for event in self.store.recent(limit=max(limit * 3, limit)):
+            redacted = self.policy.redact_event(event)
+            text = self.store.summary_for(redacted)
+            if query_lower in text.lower():
+                matches.append(
+                    {
+                        "event_id": event.event_id,
+                        "event_type": event.event_type,
+                        "summary": text,
+                        "sensitivity": redacted.sensitivity,
+                    }
+                )
+            if len(matches) >= limit:
+                break
+
+        self.audit_log.record(
+            AuditRecord(
+                actor=actor,
+                tool="sensor_timeline_search",
+                scope=query,
+                event_count=len(matches),
+                redactions_applied=[],
+                allowed=True,
+                reason="redacted timeline search",
+            )
+        )
+        return {"ok": True, "matches": matches}
+
+    def sensor_pause_scope(self, scope: str, actor: str = "hermes") -> dict[str, Any]:
+        self.audit_log.record(
+            AuditRecord(
+                actor=actor,
+                tool="sensor_pause_scope",
+                scope=scope,
+                event_count=0,
+                redactions_applied=[],
+                allowed=True,
+                reason="pause scope requested",
+            )
+        )
+        return {"ok": True, "scope": scope, "status": "pause_requested"}
+
+    def sensor_forget_scope(self, scope: str, actor: str = "hermes") -> dict[str, Any]:
+        self.audit_log.record(
+            AuditRecord(
+                actor=actor,
+                tool="sensor_forget_scope",
+                scope=scope,
+                event_count=0,
+                redactions_applied=[],
+                allowed=True,
+                reason="forget scope requested",
+            )
+        )
+        return {"ok": True, "scope": scope, "status": "forget_requested"}
+
+    def sensor_export_session_brief(
+        self,
+        limit: int = 20,
+        actor: str = "hermes",
+    ) -> dict[str, Any]:
+        notes = self.store.ambient_summary(policy=self.policy, limit=limit)
+        self.audit_log.record(
+            AuditRecord(
+                actor=actor,
+                tool="sensor_export_session_brief",
+                scope="session_brief",
+                event_count=len(self.store.recent(limit=limit)),
+                redactions_applied=[],
+                allowed=True,
+                reason="redacted session brief export",
+            )
+        )
+        return {"ok": True, "brief": notes}
