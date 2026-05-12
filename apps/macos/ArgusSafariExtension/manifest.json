@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "Argus Sensor",
+  "version": "0.1.0",
+  "description": "Consented page context for local Argus Sensor.",
+  "permissions": ["nativeMessaging", "activeTab", "scripting"],
+  "host_permissions": ["http://*/*", "https://*/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
