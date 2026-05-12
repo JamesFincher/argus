@@ -15,6 +15,8 @@ public enum ArgusEventKind: String, Codable, Equatable, Sendable {
     case calendarSignal = "calendar_signal"
     case healthSignal = "health_signal"
     case userShare = "user_share"
+    case permissionState = "permission_state"
+    case sensorHeartbeat = "sensor_heartbeat"
 }
 
 public enum ArgusSensitivity: String, Codable, Comparable, Equatable, Sendable {

@@ -1,4 +1,5 @@
 import ApplicationServices
+import ArgusCore
 import CoreGraphics
 
 struct MacPermissionSnapshot: Equatable {
@@ -19,5 +20,12 @@ struct MacPermissionSnapshot: Equatable {
     @discardableResult
     static func requestScreenRecording() -> Bool {
         CGRequestScreenCaptureAccess()
+    }
+
+    func event() -> ArgusEventEnvelope {
+        ArgusEventFactory.permissionState(
+            accessibilityTrusted: accessibilityTrusted,
+            screenRecordingGranted: screenRecordingGranted
+        )
     }
 }

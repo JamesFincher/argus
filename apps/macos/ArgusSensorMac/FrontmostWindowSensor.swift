@@ -39,6 +39,19 @@ final class FrontmostWindowSensor {
         )
     }
 
+    func captureFocusedFieldEvent() -> ArgusEventEnvelope? {
+        guard isAccessibilityTrusted(prompt: false),
+              let snapshot = readFocusedField() else {
+            return nil
+        }
+
+        return ArgusEventFactory.focusedField(
+            role: snapshot.role,
+            label: snapshot.label,
+            value: snapshot.value
+        )
+    }
+
     func currentFrontmostWindow(promptForAccessibility: Bool = false) -> FrontmostWindowInfo? {
         guard isAccessibilityTrusted(prompt: promptForAccessibility) else {
             return nil

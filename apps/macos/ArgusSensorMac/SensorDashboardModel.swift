@@ -26,6 +26,7 @@ final class SensorDashboardModel: ObservableObject {
 
     func refreshPermissions(promptAccessibility: Bool = false) {
         permissionSnapshot = MacPermissionSnapshot.current(promptAccessibility: promptAccessibility)
+        emit(permissionSnapshot.event())
     }
 
     func requestScreenRecording() {
@@ -45,11 +46,23 @@ final class SensorDashboardModel: ObservableObject {
             return
         }
 
+        emit(event)
+
+        if let focusedFieldEvent = frontmostWindowSensor.captureFocusedFieldEvent() {
+            emit(focusedFieldEvent)
+        }
+
+        Task {
+            events = await buffer.recent(limit: 12)
+            status = "Captured \(event.kind.rawValue)"
+        }
+    }
+
+    private func emit(_ event: ArgusEventEnvelope) {
         Task {
             await buffer.append(event)
             try? await eventSink?.append(event)
             events = await buffer.recent(limit: 12)
-            status = "Captured \(event.kind.rawValue)"
         }
     }
 }

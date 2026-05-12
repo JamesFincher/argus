@@ -133,4 +133,32 @@ final class ArgusCoreTests: XCTestCase {
             try LoopbackEventGatewaySink(endpoint: URL(string: "http://127.0.0.1:8765/events")!)
         )
     }
+
+    func testFocusedFieldFactoryRedactsSensitiveValueInSummary() {
+        let event = ArgusEventFactory.focusedField(
+            role: "AXTextField",
+            label: "API token",
+            value: "sk_test_1234567890abcdef"
+        )
+
+        XCTAssertEqual(event.kind, .focusedField)
+        XCTAssertEqual(event.sensitivity, .high)
+        XCTAssertFalse(event.summary.contains("sk_test_1234567890abcdef"))
+        XCTAssertTrue(event.summary.contains("[REDACTED_API_KEY]"))
+        XCTAssertEqual(event.payload["has_value"], .bool(true))
+        XCTAssertEqual(event.rawReference, "local-ax-focused-field")
+    }
+
+    func testPermissionStateFactoryEmitsSystemPermissionEvent() {
+        let event = ArgusEventFactory.permissionState(
+            accessibilityTrusted: true,
+            screenRecordingGranted: false
+        )
+
+        XCTAssertEqual(event.kind, .permissionState)
+        XCTAssertEqual(event.sensitivity, .low)
+        XCTAssertTrue(event.summary.contains("Screen Recording"))
+        XCTAssertEqual(event.payload["accessibility_trusted"], .bool(true))
+        XCTAssertEqual(event.payload["screen_recording_granted"], .bool(false))
+    }
 }
