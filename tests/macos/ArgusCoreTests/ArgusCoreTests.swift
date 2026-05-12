@@ -92,4 +92,45 @@ final class ArgusCoreTests: XCTestCase {
         let trimmedEvent = await buffer.event(id: first.id)
         XCTAssertNil(trimmedEvent)
     }
+
+    func testLocalEventSpoolAppendsAndReadsJSONLines() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let spool = LocalEventSpool(
+            fileURL: directory.appendingPathComponent("events.jsonl")
+        )
+        let first = ArgusEventEnvelope(
+            platform: .macOS,
+            source: "test",
+            kind: .frontmostWindow,
+            summary: "first"
+        )
+        let second = ArgusEventEnvelope(
+            platform: .macOS,
+            source: "test",
+            kind: .focusedField,
+            summary: "second"
+        )
+
+        try await spool.append(first)
+        try await spool.append(second)
+
+        let events = try await spool.readAll()
+        XCTAssertEqual(events.map(\.summary), ["first", "second"])
+        XCTAssertEqual(events.map(\.kind), [.frontmostWindow, .focusedField])
+    }
+
+    func testLoopbackGatewayRejectsNonLocalEndpoints() throws {
+        XCTAssertThrowsError(
+            try LoopbackEventGatewaySink(endpoint: URL(string: "https://example.com/events")!)
+        ) { error in
+            guard case LoopbackEventGatewaySink.GatewayError.nonLoopbackURL = error else {
+                return XCTFail("Unexpected error: \(error)")
+            }
+        }
+
+        XCTAssertNoThrow(
+            try LoopbackEventGatewaySink(endpoint: URL(string: "http://127.0.0.1:8765/events")!)
+        )
+    }
 }
