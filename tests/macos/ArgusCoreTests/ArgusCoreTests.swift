@@ -161,4 +161,108 @@ final class ArgusCoreTests: XCTestCase {
         XCTAssertEqual(event.payload["accessibility_trusted"], .bool(true))
         XCTAssertEqual(event.payload["screen_recording_granted"], .bool(false))
     }
+
+    func testScreenOCRPolicyRequiresConsentAndScreenRecording() {
+        let noConsent = ScreenOCRPolicy(
+            userConsented: false,
+            screenRecordingGranted: true,
+            structuralSignalsAvailable: false
+        ).evaluate()
+        XCTAssertFalse(noConsent.allowed)
+        XCTAssertEqual(noConsent.blockReason, .userConsentMissing)
+        XCTAssertFalse(noConsent.includesAudio)
+
+        let missingPermission = ScreenOCRPolicy(
+            userConsented: true,
+            screenRecordingGranted: false,
+            structuralSignalsAvailable: false
+        ).evaluate()
+        XCTAssertFalse(missingPermission.allowed)
+        XCTAssertEqual(missingPermission.blockReason, .screenRecordingPermissionMissing)
+        XCTAssertFalse(missingPermission.includesAudio)
+    }
+
+    func testScreenOCRPolicyPrefersStructuralSignalsBeforeCapture() {
+        let decision = ScreenOCRPolicy(
+            userConsented: true,
+            screenRecordingGranted: true,
+            structuralSignalsAvailable: true
+        ).evaluate()
+
+        XCTAssertFalse(decision.allowed)
+        XCTAssertEqual(decision.blockReason, .structuralSignalsAvailable)
+        XCTAssertFalse(decision.includesAudio)
+    }
+
+    func testScreenOCRPolicyAllowsOnlyLowRateNoAudioCapture() {
+        let now = Date(timeIntervalSince1970: 100)
+        let policy = ScreenOCRPolicy(
+            userConsented: true,
+            screenRecordingGranted: true,
+            structuralSignalsAvailable: false,
+            minimumFrameInterval: 3
+        )
+
+        let rateLimited = policy.evaluate(
+            now: now,
+            lastCapturedAt: now.addingTimeInterval(-1)
+        )
+        XCTAssertFalse(rateLimited.allowed)
+        XCTAssertEqual(rateLimited.blockReason, .rateLimited)
+        XCTAssertFalse(rateLimited.includesAudio)
+
+        let allowed = policy.evaluate(
+            now: now,
+            lastCapturedAt: now.addingTimeInterval(-4)
+        )
+        XCTAssertTrue(allowed.allowed)
+        XCTAssertNil(allowed.blockReason)
+        XCTAssertEqual(allowed.minimumFrameInterval, 3)
+        XCTAssertFalse(allowed.includesAudio)
+    }
+
+    func testScreenOCREventBuilderRedactsBeforeSummary() throws {
+        let decision = ScreenOCRPolicyDecision(
+            allowed: true,
+            blockReason: nil,
+            minimumFrameInterval: 2,
+            includesAudio: false
+        )
+        let event = try XCTUnwrap(ScreenOCREventBuilder().event(
+            observations: [
+                ScreenOCRTextObservation(
+                    text: "Reset token sk_test_1234567890abcdef for james@example.com",
+                    confidence: 0.92
+                )
+            ],
+            decision: decision,
+            appName: "Safari",
+            windowTitle: "Account"
+        ))
+
+        XCTAssertEqual(event.kind, .screenFrame)
+        XCTAssertEqual(event.source, "screencapturekit.vision_ocr")
+        XCTAssertEqual(event.sensitivity, .high)
+        XCTAssertFalse(event.summary.contains("sk_test_1234567890abcdef"))
+        XCTAssertFalse(event.summary.contains("james@example.com"))
+        XCTAssertTrue(event.summary.contains("[REDACTED_API_KEY]"))
+        XCTAssertTrue(event.summary.contains("[REDACTED_EMAIL]"))
+        XCTAssertEqual(event.redactionsApplied, ["api_key", "email", "keyword_secret"])
+        XCTAssertEqual(event.payload["includes_audio"], .bool(false))
+        XCTAssertEqual(event.payload["redaction_before_summary"], .bool(true))
+        XCTAssertEqual(event.rawReference, "local-screen-ocr-frame")
+    }
+
+    func testScreenOCREventBuilderDropsDisallowedOrEmptyCapture() {
+        let builder = ScreenOCREventBuilder()
+
+        XCTAssertNil(builder.event(
+            observations: [ScreenOCRTextObservation(text: "Visible text", confidence: 0.7)],
+            decision: ScreenOCRPolicyDecision(allowed: false, blockReason: .userConsentMissing)
+        ))
+        XCTAssertNil(builder.event(
+            observations: [ScreenOCRTextObservation(text: "   ", confidence: 0.7)],
+            decision: ScreenOCRPolicyDecision(allowed: true, blockReason: nil)
+        ))
+    }
 }
