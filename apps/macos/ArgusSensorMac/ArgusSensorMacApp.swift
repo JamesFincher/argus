@@ -23,5 +23,17 @@ struct ArgusSensorMacApp: App {
                 .keyboardShortcut("r", modifiers: [.command])
             }
         }
+
+        MenuBarExtra(ArgusBrand.sensorName, systemImage: model.isPaused ? "eye.slash" : "eye") {
+            Button(model.isPaused ? "Resume Sensor" : "Pause Sensor") {
+                model.togglePause()
+            }
+            Button("Capture Snapshot") {
+                model.captureSnapshot()
+            }
+            .disabled(model.isPaused)
+            Divider()
+            Text(model.status)
+        }
     }
 }

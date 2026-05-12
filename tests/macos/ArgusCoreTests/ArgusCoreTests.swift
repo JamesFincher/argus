@@ -162,6 +162,29 @@ final class ArgusCoreTests: XCTestCase {
         XCTAssertEqual(event.payload["screen_recording_granted"], .bool(false))
     }
 
+    func testSensorControlFactoryEmitsVisibleOperatorControlEvent() {
+        let event = ArgusEventFactory.sensorControl(action: "pause", scope: "macos")
+
+        XCTAssertEqual(event.kind, .sensorControl)
+        XCTAssertEqual(event.sensitivity, .low)
+        XCTAssertEqual(event.payload["action"], .string("pause"))
+        XCTAssertEqual(event.payload["scope"], .string("macos"))
+    }
+
+    func testAppLifecycleFactoryEmitsNSWorkspaceLifecycleEvent() {
+        let event = ArgusEventFactory.appLifecycle(
+            bundleID: "com.apple.Safari",
+            appName: "Safari",
+            lifecycle: "launched"
+        )
+
+        XCTAssertEqual(event.kind, .appLifecycle)
+        XCTAssertEqual(event.source, "nsworkspace.app_lifecycle")
+        XCTAssertEqual(event.payload["bundle_id"], .string("com.apple.Safari"))
+        XCTAssertEqual(event.payload["app_name"], .string("Safari"))
+        XCTAssertEqual(event.payload["lifecycle"], .string("launched"))
+    }
+
     func testScreenOCRPolicyRequiresConsentAndScreenRecording() {
         let noConsent = ScreenOCRPolicy(
             userConsented: false,

@@ -58,4 +58,42 @@ public enum ArgusEventFactory {
             sensitivity: .low
         )
     }
+
+    public static func sensorControl(
+        action: String,
+        scope: String = "macos",
+        source: String = "macos.operator_control"
+    ) -> ArgusEventEnvelope {
+        ArgusEventEnvelope(
+            platform: .macOS,
+            source: source,
+            kind: .sensorControl,
+            summary: "Sensor control: \(action) \(scope)",
+            payload: [
+                "action": .string(action),
+                "scope": .string(scope)
+            ],
+            sensitivity: .low
+        )
+    }
+
+    public static func appLifecycle(
+        bundleID: String?,
+        appName: String,
+        lifecycle: String,
+        source: String = "nsworkspace.app_lifecycle"
+    ) -> ArgusEventEnvelope {
+        ArgusEventEnvelope(
+            platform: .macOS,
+            source: source,
+            kind: .appLifecycle,
+            summary: "App \(lifecycle): \(appName)",
+            payload: [
+                "bundle_id": bundleID.map(ArgusJSONValue.string) ?? .null,
+                "app_name": .string(appName),
+                "lifecycle": .string(lifecycle)
+            ],
+            sensitivity: .low
+        )
+    }
 }

@@ -11,6 +11,7 @@ final class SensorDashboardModel: ObservableObject {
     private let buffer = LocalEventBuffer(limit: 250)
     private let eventSink: LocalEventSpool?
     private let frontmostWindowSensor = FrontmostWindowSensor()
+    private let appLifecycleSensor = AppLifecycleSensor()
 
     init() {
         self.eventSink = try? LocalEventSpool.defaultMacSpool()
@@ -19,8 +20,12 @@ final class SensorDashboardModel: ObservableObject {
     func togglePause() {
         isPaused.toggle()
         status = isPaused ? "Paused" : "Active"
+        emit(ArgusEventFactory.sensorControl(action: isPaused ? "pause" : "resume"))
         if !isPaused {
+            appLifecycleSensor.start(emit: emit)
             captureSnapshot()
+        } else {
+            appLifecycleSensor.stop()
         }
     }
 
@@ -58,7 +63,7 @@ final class SensorDashboardModel: ObservableObject {
         }
     }
 
-    private func emit(_ event: ArgusEventEnvelope) {
+    func emit(_ event: ArgusEventEnvelope) {
         Task {
             await buffer.append(event)
             try? await eventSink?.append(event)
