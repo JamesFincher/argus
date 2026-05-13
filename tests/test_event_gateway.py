@@ -1,6 +1,8 @@
 from dataclasses import dataclass, field
 from http.server import ThreadingHTTPServer
+import json
 import threading
+import urllib.error
 import urllib.request
 
 from argus_services.event_gateway import EventGateway, make_handler, run
@@ -153,6 +155,59 @@ def test_gateway_metrics_endpoint_is_loopback_prometheus_text():
         assert "argus_events_ingested_total 1" in body
         assert "argus_policy_blocks_total 1" in body
         assert "argus_sensor_bytes_written_total " in body
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+
+
+def test_gateway_http_error_and_control_routes():
+    gateway = EventGateway(publisher=RecordingPublisher())
+    server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(gateway))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base_url = f"http://127.0.0.1:{server.server_address[1]}"
+
+    try:
+        assert json.loads(urllib.request.urlopen(f"{base_url}/health", timeout=5).read()) == {"ok": True}
+        try:
+            urllib.request.urlopen(f"{base_url}/missing", timeout=5)
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 404
+        else:
+            raise AssertionError("missing route should 404")
+
+        resume = urllib.request.Request(
+            f"{base_url}/control/resume",
+            data=b"scope=all",
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            method="POST",
+        )
+        assert json.loads(urllib.request.urlopen(resume, timeout=5).read())["status"] == "active"
+
+        forget = urllib.request.Request(f"{base_url}/control/forget", data=b"{}", method="POST")
+        try:
+            urllib.request.urlopen(forget, timeout=5)
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 400
+            assert "scope is required" in exc.read().decode("utf-8")
+        else:
+            raise AssertionError("forget without scope should fail")
+
+        unknown = urllib.request.Request(f"{base_url}/unknown", data=b"{}", method="POST")
+        try:
+            urllib.request.urlopen(unknown, timeout=5)
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 404
+        else:
+            raise AssertionError("unknown POST route should fail")
+
+        bad_event = urllib.request.Request(f"{base_url}/events", data=b"{bad", method="POST")
+        try:
+            urllib.request.urlopen(bad_event, timeout=5)
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 400
+        else:
+            raise AssertionError("bad event payload should fail")
     finally:
         server.shutdown()
         thread.join(timeout=2)

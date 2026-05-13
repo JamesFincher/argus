@@ -56,3 +56,32 @@ def test_hermes_pre_llm_context_records_audit_actor():
     assert audit[0].actor == "session-123"
     assert audit[0].tool == "sensor_get_recent_notes"
     assert audit[0].scope == "recent_notes"
+
+
+def test_hermes_pre_tool_blocks_sensitive_non_sensor_arguments_and_unknown_raw_event():
+    ctx = FakeHermesContext()
+    result = register(ctx, approval_token="ok")
+
+    blocked_args = ctx.hooks["pre_tool_call"](
+        tool_name="shell",
+        arguments={"command": "export TOKEN=Bearer abcdefghijklmnopqrstuvwxyz"},
+    )
+    safe_args = ctx.hooks["pre_tool_call"](
+        tool_name="shell",
+        arguments={"command": "pwd"},
+    )
+    unknown_raw = ctx.hooks["pre_tool_call"](
+        tool_name="sensor_expand_event",
+        arguments={"event_id": "missing", "raw_mode": "full", "approval_token": "ok"},
+    )
+
+    assert result["policy"].approval_token == "ok"
+    assert blocked_args == {
+        "block": True,
+        "reason": "tool arguments contain raw sensitive material",
+    }
+    assert safe_args is None
+    assert unknown_raw == {
+        "block": True,
+        "reason": "raw event expansion requires known event_id",
+    }
