@@ -8,6 +8,7 @@ from typing import Any, Callable
 from .audit import AuditRecord, InMemoryAuditLog
 from .events import EventEnvelope
 from .policy import RedactionPolicy
+from .purge import ScopePurgeResult
 from .store import InMemoryEventStore
 
 ToolCallable = Callable[..., dict[str, Any]]
@@ -257,19 +258,44 @@ class LocalMCPServer:
         return {"ok": True, "scope": scope, "status": "pause_requested"}
 
     def sensor_forget_scope(self, scope: str, actor: str = "hermes") -> dict[str, Any]:
+        events_removed = (
+            self.store.forget_scope(scope)
+            if hasattr(self.store, "forget_scope")
+            else 0
+        )
+        audit_records_tombstoned = (
+            self.audit_log.tombstone_scope(scope)
+            if hasattr(self.audit_log, "tombstone_scope")
+            else 0
+        )
+        result = ScopePurgeResult(
+            scope=scope,
+            events_removed=events_removed,
+            audit_records_tombstoned=audit_records_tombstoned,
+        )
         self.audit_log.record(
             AuditRecord(
                 actor=actor,
                 tool="sensor_forget_scope",
                 scope=scope,
-                event_count=0,
+                event_count=events_removed,
                 redactions_applied=[],
                 allowed=True,
-                reason="forget scope requested",
-                details={"requested_scope": scope},
+                reason="forget scope applied",
+                details={
+                    "requested_scope": scope,
+                    "purge_result": result.to_dict(),
+                    "stores": {
+                        "timeline": "purged",
+                        "audit_raw_payloads": "tombstoned",
+                        "lancedb": "not_configured",
+                        "neo4j": "not_configured",
+                        "retained_blobs": "not_configured",
+                    },
+                },
             )
         )
-        return {"ok": True, "scope": scope, "status": "forget_requested"}
+        return {"ok": True, "scope": scope, "status": "forgotten", **result.to_dict()}
 
     def sensor_export_session_brief(
         self,

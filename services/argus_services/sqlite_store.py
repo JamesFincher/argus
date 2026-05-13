@@ -11,6 +11,7 @@ from typing import Any
 from .audit import AuditRecord
 from .events import EventEnvelope
 from .policy import RedactionPolicy
+from .purge import scope_matches_event, tombstone_raw_event_details
 from .store import event_summary
 
 
@@ -159,6 +160,23 @@ class SQLiteTimelineStore:
             ).fetchall()
         return [event_from_row(row) for row in rows]
 
+    def forget_scope(self, scope: str) -> int:
+        with self._lock:
+            rows = self.connection.execute("SELECT * FROM events").fetchall()
+            event_ids = [
+                row["event_id"]
+                for row in rows
+                if scope_matches_event(event_from_row(row), scope)
+            ]
+            if event_ids:
+                placeholders = ",".join("?" for _ in event_ids)
+                self.connection.execute(
+                    f"DELETE FROM events WHERE event_id IN ({placeholders})",
+                    event_ids,
+                )
+            self.connection.commit()
+        return len(event_ids)
+
     def ambient_summary(self, *, policy: RedactionPolicy, limit: int = 5) -> str:
         notes = []
         for event in self.recent(limit=limit):
@@ -245,6 +263,25 @@ class SQLiteAuditLog:
                 (limit,),
             ).fetchall()
         return [audit_record_from_row(row) for row in rows]
+
+    def tombstone_scope(self, scope: str) -> int:
+        tombstoned = 0
+        with self._lock:
+            rows = self.connection.execute(
+                "SELECT audit_id, details_json FROM audit_records"
+            ).fetchall()
+            for row in rows:
+                details = json.loads(row["details_json"])
+                updated, changed = tombstone_raw_event_details(details, scope)
+                if not changed:
+                    continue
+                self.connection.execute(
+                    "UPDATE audit_records SET details_json = ? WHERE audit_id = ?",
+                    (_json(updated), row["audit_id"]),
+                )
+                tombstoned += 1
+            self.connection.commit()
+        return tombstoned
 
 
 def event_from_row(row: sqlite3.Row) -> EventEnvelope:

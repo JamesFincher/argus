@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 
 from .events import EventEnvelope
 from .policy import RedactionPolicy
+from .purge import scope_matches_event
 
 
 @dataclass
@@ -27,6 +28,17 @@ class InMemoryEventStore:
                 if event.event_type.startswith(event_type_prefix)
             ]
         return list(reversed(candidates[-limit:]))
+
+    def forget_scope(self, scope: str) -> int:
+        remaining = []
+        removed = 0
+        for event in self.events:
+            if scope_matches_event(event, scope):
+                removed += 1
+            else:
+                remaining.append(event)
+        self.events = remaining
+        return removed
 
     def ambient_summary(self, *, policy: RedactionPolicy, limit: int = 5) -> str:
         notes = []

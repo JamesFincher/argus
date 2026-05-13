@@ -8,6 +8,7 @@ from .mcp import LocalMCPServer, ToolRegistry
 from .metrics import METRIC_NAMES, MetricsRegistry
 from .perception import PerceptionOutput, PerceptionWorker, TemplateSummarizer
 from .policy import PolicyDecision, RedactionPolicy, RedactionResult
+from .purge import ScopePurgeResult
 from .retrieval import InMemoryNoteIndex, RetrievalNote
 from .sqlite_store import SQLiteAuditLog, SQLiteTimelineStore
 from .store import InMemoryEventStore
@@ -37,6 +38,7 @@ __all__ = [
     "RetrievalNote",
     "SQLiteAuditLog",
     "SQLiteTimelineStore",
+    "ScopePurgeResult",
     "StreamMessage",
     "TemplateSummarizer",
     "ToolRegistry",

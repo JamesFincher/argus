@@ -128,9 +128,56 @@ def test_dashboard_http_routes_are_local_json_and_html():
         thread.join(timeout=2)
 
 
+def test_dashboard_http_forget_and_export_controls_apply_policy():
+    gateway = EventGateway(publisher=RecordingPublisher())
+    event = make_event(
+        "perception.note",
+        {"summary": "Email alex@example.com about vendor.example pricing"},
+        source_platform="macos",
+    )
+    gateway.ingest(event)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(gateway))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base_url = f"http://127.0.0.1:{server.server_address[1]}"
+
+    try:
+        export = urllib.request.Request(
+            f"{base_url}/control/export",
+            data=b"limit=10",
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            method="POST",
+        )
+        brief = json.loads(urllib.request.urlopen(export, timeout=5).read())
+        assert brief["ok"] is True
+        assert "alex@example.com" not in brief["brief"]
+        assert "[REDACTED_EMAIL]" in brief["brief"]
+
+        forget = urllib.request.Request(
+            f"{base_url}/control/forget",
+            data=b"scope=vendor.example",
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            method="POST",
+        )
+        purged = json.loads(urllib.request.urlopen(forget, timeout=5).read())
+        state = json.loads(urllib.request.urlopen(f"{base_url}/dashboard.json", timeout=5).read())
+
+        assert purged["status"] == "forgotten"
+        assert purged["events_removed"] == 1
+        assert state["raw_events"] == []
+        raw_record = next(
+            record for record in state["audit_records"]
+            if record["tool"] == "sensor_ingest_raw"
+        )
+        assert raw_record["details"]["raw_event"]["tombstoned"] is True
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+
+
 def test_dashboard_html_contains_management_sections():
     state = {
-        "sensor_control": {"paused_scopes": ["macos"]},
+        "sensor_control": {"paused_scopes": ["macos"], "actions": {}},
         "redis": {"ping": "PONG"},
         "raw_events": [],
         "hermes_outputs": [],
@@ -139,6 +186,8 @@ def test_dashboard_html_contains_management_sections():
 
     html = render_dashboard_html(state)
 
-    assert "Pause macOS Sensor Ingest" in html
+    assert "Pause Sensor Ingest" in html
+    assert "Forget Scope" in html
+    assert "Export Session Brief" in html
     assert "Sanitized Hermes Outputs" in html
     assert "Raw Local Events" in html

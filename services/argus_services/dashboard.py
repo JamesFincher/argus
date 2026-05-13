@@ -36,6 +36,12 @@ def dashboard_state(
         "ok": True,
         "sensor_control": {
             "paused_scopes": sorted(paused_scopes or set()),
+            "actions": {
+                "pause": "/control/pause",
+                "resume": "/control/resume",
+                "forget": "/control/forget",
+                "export": "/control/export",
+            },
         },
         "redis": redis_status(publisher),
         "raw_events": raw_events,
@@ -131,8 +137,22 @@ def render_dashboard_html(state: dict[str, Any]) -> str:
     <h2>System Control</h2>
     <p>Paused scopes: {html.escape(paused)}</p>
     <p>Redis ping: {redis_ping}</p>
-    <form method="post" action="/control/pause"><button type="submit">Pause macOS Sensor Ingest</button></form>
-    <form method="post" action="/control/resume"><button type="submit">Resume macOS Sensor Ingest</button></form>
+    <form method="post" action="/control/pause">
+      <input name="scope" value="macos" aria-label="Pause scope">
+      <button type="submit">Pause Sensor Ingest</button>
+    </form>
+    <form method="post" action="/control/resume">
+      <input name="scope" value="macos" aria-label="Resume scope">
+      <button type="submit">Resume Sensor Ingest</button>
+    </form>
+    <form method="post" action="/control/forget">
+      <input name="scope" placeholder="domain, app, project, or all" aria-label="Forget scope">
+      <button type="submit">Forget Scope</button>
+    </form>
+    <form method="post" action="/control/export">
+      <input name="limit" value="20" aria-label="Export limit">
+      <button type="submit">Export Session Brief</button>
+    </form>
   </section>
   <section><h2>Raw Local Events</h2><ul>{raw_items}</ul></section>
   <section><h2>Sanitized Hermes Outputs</h2><ul>{hermes_items}</ul></section>

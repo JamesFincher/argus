@@ -112,6 +112,31 @@ def test_sqlite_fts_search_uses_payload_summary_title_domain_and_tags(tmp_path):
         store.close()
 
 
+def test_sqlite_forget_scope_deletes_events_and_fts_rows(tmp_path):
+    store = SQLiteTimelineStore(tmp_path / "timeline.db")
+    vendor = make_event(
+        "activity.browser_page",
+        {"title": "Pricing plans", "domain": "vendor.example"},
+        tags=["procurement"],
+    )
+    other = make_event(
+        "activity.browser_page",
+        {"title": "Docs", "domain": "docs.example"},
+        tags=["reference"],
+    )
+
+    try:
+        store.add(vendor)
+        store.add(other)
+
+        assert store.forget_scope("vendor.example") == 1
+        assert store.get(vendor.event_id) is None
+        assert store.get(other.event_id) is not None
+        assert store.search("vendor pricing") == []
+    finally:
+        store.close()
+
+
 def test_sqlite_ambient_summary_redacts_policy_sensitive_text(tmp_path):
     store = SQLiteTimelineStore(tmp_path / "timeline.db")
     event = make_event(
@@ -178,6 +203,38 @@ def test_sqlite_audit_log_records_and_reads_recent_entries(tmp_path):
         assert recent[0].redactions_applied == ["email"]
         assert recent[0].allowed is True
         assert recent[1].allowed is False
+    finally:
+        audit_log.close()
+
+
+def test_sqlite_audit_log_tombstones_matching_raw_event_details(tmp_path):
+    audit_log = SQLiteAuditLog(tmp_path / "timeline.db")
+    event = make_event(
+        "activity.browser_page",
+        {"title": "Pricing", "domain": "vendor.example"},
+    )
+
+    try:
+        audit_log.record(
+            AuditRecord(
+                actor="argus-event-gateway",
+                tool="sensor_ingest_raw",
+                scope="stream:raw:macos",
+                event_count=1,
+                redactions_applied=[],
+                allowed=True,
+                reason="raw ingest",
+                details={"raw_event": event.to_dict(), "raw_data_local_only": True},
+            )
+        )
+
+        assert audit_log.tombstone_scope("vendor.example") == 1
+        details = audit_log.recent(limit=1)[0].details
+
+        assert details["raw_data_purged"] is True
+        assert details["raw_event"]["tombstoned"] is True
+        assert details["raw_event"]["event_id"] == event.event_id
+        assert "payload" not in details["raw_event"]
     finally:
         audit_log.close()
 

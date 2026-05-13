@@ -1,3 +1,4 @@
+from argus_services.audit import AuditRecord
 from argus_services.events import make_event
 from argus_services.mcp import LocalMCPServer
 from argus_services.policy import RedactionPolicy
@@ -147,3 +148,37 @@ def test_timeline_search_uses_sqlite_fts_when_available(tmp_path):
         assert server.audit_log.records[-1].event_count == 1
     finally:
         store.close()
+
+
+def test_forget_scope_purges_events_and_tombstones_raw_audit():
+    store = InMemoryEventStore()
+    event = store.add(
+        make_event(
+            "activity.browser_page",
+            {"title": "Pricing", "domain": "vendor.example"},
+        )
+    )
+    server = LocalMCPServer(store=store, policy=RedactionPolicy())
+    server.audit_log.record(
+        AuditRecord(
+            actor="argus-event-gateway",
+            tool="sensor_ingest_raw",
+            scope="stream:raw:macos",
+            event_count=1,
+            redactions_applied=[],
+            allowed=True,
+            reason="raw ingest",
+            details={"raw_event": event.to_dict(), "raw_data_local_only": True},
+        )
+    )
+
+    result = server.call_tool("sensor_forget_scope", scope="vendor.example", actor="hermes")
+
+    assert result["ok"] is True
+    assert result["status"] == "forgotten"
+    assert result["events_removed"] == 1
+    assert result["audit_records_tombstoned"] == 1
+    assert store.get(event.event_id) is None
+    assert server.audit_log.records[0].details["raw_event"]["tombstoned"] is True
+    assert server.audit_log.records[-1].tool == "sensor_forget_scope"
+    assert server.audit_log.records[-1].event_count == 1

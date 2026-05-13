@@ -13,11 +13,13 @@ import os
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
+from urllib.parse import parse_qs
 
 from .audit import AuditRecord, InMemoryAuditLog
 from .dashboard import dashboard_state, render_dashboard_html
 from .events import EventEnvelope
 from .policy import RedactionPolicy
+from .purge import ScopePurgeResult
 from .sqlite_store import SQLiteAuditLog, SQLiteTimelineStore
 from .store import InMemoryEventStore
 from .streams import RedisStreamPublisher, StreamPublisher, stream_for_event
@@ -137,6 +139,63 @@ class EventGateway:
     def is_paused(self, scope: str) -> bool:
         return "all" in self.paused_scopes or scope in self.paused_scopes
 
+    def forget_scope(self, scope: str) -> dict[str, Any]:
+        events_removed = (
+            self.store.forget_scope(scope)
+            if hasattr(self.store, "forget_scope")
+            else 0
+        )
+        audit_records_tombstoned = (
+            self.audit_log.tombstone_scope(scope)
+            if hasattr(self.audit_log, "tombstone_scope")
+            else 0
+        )
+        result = ScopePurgeResult(
+            scope=scope,
+            events_removed=events_removed,
+            audit_records_tombstoned=audit_records_tombstoned,
+        )
+        self.audit_log.record(
+            AuditRecord(
+                actor="argus-dashboard",
+                tool="sensor_forget_scope",
+                scope=scope,
+                event_count=events_removed,
+                redactions_applied=[],
+                allowed=True,
+                reason="operator forgot scoped local data",
+                details={
+                    "requested_scope": scope,
+                    "purge_result": result.to_dict(),
+                    "stores": {
+                        "timeline": "purged",
+                        "audit_raw_payloads": "tombstoned",
+                        "lancedb": "not_configured",
+                        "neo4j": "not_configured",
+                        "retained_blobs": "not_configured",
+                    },
+                },
+            )
+        )
+        return {"ok": True, "status": "forgotten", **result.to_dict()}
+
+    def export_session_brief(self, *, limit: int = 20) -> dict[str, Any]:
+        brief = self.store.ambient_summary(policy=self.policy, limit=limit)
+        event_count = len(self.store.recent(limit=limit))
+        self.audit_log.record(
+            AuditRecord(
+                actor="argus-dashboard",
+                tool="sensor_export_session_brief",
+                scope="session_brief",
+                event_count=event_count,
+                redactions_applied=[],
+                allowed=True,
+                reason="operator exported redacted session brief",
+                details={"sanitized_brief": brief},
+            )
+        )
+        return {"ok": True, "brief": brief, "event_count": event_count}
+
     def dashboard_state(self) -> dict[str, Any]:
         return dashboard_state(
             store=self.store,
@@ -174,6 +233,24 @@ def make_handler(gateway: EventGateway) -> type[BaseHTTPRequestHandler]:
                     gateway.resume_scope(scope)
                     status = "active"
                 self._write_json(200, {"ok": True, "scope": scope, "status": status})
+                return
+
+            if self.path == "/control/forget":
+                payload = self._read_payload()
+                scope = str(payload.get("scope") or "")
+                if not scope:
+                    self._write_json(400, {"ok": False, "error": "scope is required"})
+                    return
+                try:
+                    self._write_json(200, gateway.forget_scope(scope))
+                except ValueError as exc:
+                    self._write_json(400, {"ok": False, "error": str(exc)})
+                return
+
+            if self.path == "/control/export":
+                payload = self._read_payload()
+                limit = int(payload.get("limit") or 20)
+                self._write_json(200, gateway.export_session_brief(limit=limit))
                 return
 
             try:
@@ -215,7 +292,14 @@ def make_handler(gateway: EventGateway) -> type[BaseHTTPRequestHandler]:
             if length == 0:
                 return {}
             body = self.rfile.read(length)
-            return json.loads(body.decode("utf-8"))
+            content_type = self.headers.get("Content-Type", "")
+            text = body.decode("utf-8")
+            if "application/x-www-form-urlencoded" in content_type:
+                return {
+                    key: values[-1]
+                    for key, values in parse_qs(text, keep_blank_values=True).items()
+                }
+            return json.loads(text)
 
     return ArgusEventGatewayHandler
 

@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from .events import utc_now_iso
+from .purge import tombstone_raw_event_details
 
 
 @dataclass(frozen=True)
@@ -44,3 +45,16 @@ class InMemoryAuditLog:
 
     def recent(self, limit: int = 20) -> list[AuditRecord]:
         return list(reversed(self.records[-limit:]))
+
+    def tombstone_scope(self, scope: str) -> int:
+        tombstoned = 0
+        updated_records: list[AuditRecord] = []
+        for record in self.records:
+            details, changed = tombstone_raw_event_details(record.details, scope)
+            if changed:
+                tombstoned += 1
+                updated_records.append(replace(record, details=details))
+            else:
+                updated_records.append(record)
+        self.records = updated_records
+        return tombstoned
