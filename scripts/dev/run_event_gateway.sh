@@ -3,4 +3,5 @@ set -euo pipefail
 
 cd "$(dirname "$0")/../.."
 
-exec uv run python -m argus_services.event_gateway --host 127.0.0.1 --port 8765
+export PYTHONPATH="$PWD/services${PYTHONPATH:+:$PYTHONPATH}"
+exec uv run python -c 'from argus_services.event_gateway import run; run(host="127.0.0.1", port=8765)'

@@ -49,8 +49,17 @@ Run the local event gateway on `127.0.0.1:8765`:
 scripts/dev/run_event_gateway.sh
 ```
 
+Or start it in the background and inspect runtime status:
+
+```sh
+scripts/dev/start_event_gateway.sh
+scripts/dev/status_stack.sh
+```
+
 The Docker Compose stack publishes Redis, Neo4j, Prometheus, and Grafana only
-on `127.0.0.1` by default.
+on `127.0.0.1` by default. Redis protected mode is disabled for this local
+stack so the host event gateway can write through Docker's loopback-published
+port.
 
 ## macOS App
 
@@ -58,6 +67,13 @@ Build the macOS Argus Sensor package target:
 
 ```sh
 swift build --target ArgusSensorMac
+```
+
+Package it as a local `.app` bundle:
+
+```sh
+scripts/dev/package_macos_app.sh
+open "dist/Argus Sensor.app"
 ```
 
 The app includes permission status, pause/resume controls, a visible menu bar

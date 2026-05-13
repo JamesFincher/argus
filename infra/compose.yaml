@@ -10,7 +10,7 @@ services:
       - --appendonly
       - "no"
       - --protected-mode
-      - "yes"
+      - "no"
     ports:
       - "127.0.0.1:6379:6379"
     restart: unless-stopped
@@ -27,8 +27,6 @@ services:
     image: neo4j:5-community
     environment:
       NEO4J_AUTH: neo4j/localdevpassword
-      NEO4J_server_metrics_prometheus_enabled: "true"
-      NEO4J_server_metrics_prometheus_endpoint: 0.0.0.0:2004
     ports:
       - "127.0.0.1:7474:7474"
       - "127.0.0.1:7687:7687"
@@ -50,7 +48,6 @@ services:
       - prometheus-data:/prometheus
     depends_on:
       - redis-exporter
-      - neo4j
     restart: unless-stopped
 
   grafana:

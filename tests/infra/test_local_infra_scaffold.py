@@ -41,6 +41,13 @@ def test_compose_publishes_services_on_loopback_only():
     assert all(port.startswith("127.0.0.1:") for port in ports)
 
 
+def test_redis_accepts_host_gateway_connections_only_because_loopback_bound():
+    compose = read("infra/compose.yaml")
+
+    assert "--protected-mode\n      - \"no\"" in compose
+    assert "127.0.0.1:6379:6379" in compose
+
+
 def test_redis_stream_manifest_matches_spec_names():
     manifest = json.loads(read("infra/redis/streams.json"))
     streams = manifest["streams"]
@@ -71,5 +78,4 @@ def test_prometheus_scrapes_local_stack_targets():
     prometheus = read("infra/prometheus/prometheus.yml")
 
     assert "redis-exporter:9121" in prometheus
-    assert "neo4j:2004" in prometheus
     assert "prometheus:9090" in prometheus
