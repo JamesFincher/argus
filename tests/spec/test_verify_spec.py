@@ -36,6 +36,7 @@ def create_valid_scaffold(root: Path) -> None:
                 "Required artifact",
                 "Test gate",
                 "schema migration test",
+                "canonicalizer precedence tests",
                 "redaction regression suite",
                 "MCP discovery test",
                 "Redis replay test",

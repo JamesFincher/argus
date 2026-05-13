@@ -635,7 +635,7 @@ def test_purge_scope_matching_and_tombstone_edges():
     assert scope_matches_event(event, "vendor.example") is True
     assert scope_matches_event(event, "alpha") is True
     assert scope_matches_event(event, "missing") is False
-    assert scope_matches_event(make_event("activity.browser_page", {"host": "deep.vendor.example"}), "vendor.example")
+    assert scope_matches_event(make_event("activity.browser_page", {"label": "deep.vendor.example"}), "vendor.example")
     assert scope_matches_event(make_event("activity.browser_page", {}, tags=["   "]), "missing") is False
     with pytest.raises(ValueError, match="cannot be empty"):
         normalize_scope("  ")

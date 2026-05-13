@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from .canonicalizer import SignalCanonicalizer
 from .events import EventEnvelope, Relationship, make_event
 from .policy import RedactionPolicy
 from .streams import POLICY_BLOCKED_STREAM, stream_for_event
@@ -62,6 +63,7 @@ class PerceptionOutput:
 class PerceptionWorker:
     policy: RedactionPolicy = field(default_factory=RedactionPolicy)
     summarizer: Summarizer = field(default_factory=TemplateSummarizer)
+    canonicalizer: SignalCanonicalizer = field(default_factory=SignalCanonicalizer)
 
     def process(self, event: EventEnvelope) -> PerceptionOutput:
         normalized = self.normalize(event)
@@ -87,6 +89,11 @@ class PerceptionWorker:
             blocked_event=None,
             stream=stream_for_event(note),
         )
+
+    def process_batch(self, events: list[EventEnvelope]) -> list[PerceptionOutput]:
+        normalized = [self.normalize(event) for event in events]
+        canonical = self.canonicalizer.canonicalize(normalized)
+        return [self.process(event) for event in canonical.selected]
 
     def normalize(self, event: EventEnvelope) -> EventEnvelope:
         payload = _normalize_payload(event.payload)
