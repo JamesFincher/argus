@@ -1,5 +1,6 @@
 from argus_services.audit import AuditRecord
 from argus_services.events import make_event
+from argus_services.graph import GraphConfig
 from argus_services.mcp import LocalMCPServer
 from argus_services.policy import RedactionPolicy
 from argus_services.sqlite_store import SQLiteTimelineStore
@@ -32,6 +33,7 @@ def test_mcp_discovery_exposes_spec_tools():
         "sensor_timeline_search",
         "sensor_get_recent_notes",
         "sensor_expand_event",
+        "sensor_find_workflow_patterns",
         "sensor_pause_scope",
         "sensor_forget_scope",
         "sensor_export_session_brief",
@@ -171,6 +173,60 @@ def test_timeline_search_uses_embedding_note_index_and_redacts_summary():
     assert result["matches"][0]["source_event_ids"] == ["source-1"]
 
 
+def test_workflow_patterns_use_local_timeline_when_graph_disabled():
+    server = LocalMCPServer(policy=RedactionPolicy())
+    server.add_event(
+        make_event(
+            "activity.frontmost_window",
+            {"summary": "Safari"},
+            observed_at="2026-05-13T14:00:00Z",
+        )
+    )
+    server.add_event(
+        make_event(
+            "activity.browser_page",
+            {"summary": "Pricing"},
+            observed_at="2026-05-13T14:01:00Z",
+        )
+    )
+    server.add_event(
+        make_event(
+            "activity.frontmost_window",
+            {"summary": "CRM"},
+            observed_at="2026-05-13T14:02:00Z",
+        )
+    )
+    server.add_event(
+        make_event(
+            "activity.browser_page",
+            {"summary": "Pricing again"},
+            observed_at="2026-05-13T14:03:00Z",
+        )
+    )
+
+    result = server.call_tool("sensor_find_workflow_patterns", limit=2, actor="hermes")
+
+    assert result["ok"] is True
+    assert result["graph_enabled"] is False
+    assert result["source"] == "local_timeline"
+    assert result["patterns"][0] == {
+        "from_event_type": "activity.frontmost_window",
+        "to_event_type": "activity.browser_page",
+        "count": 2,
+    }
+    assert server.audit_log.records[-1].tool == "sensor_find_workflow_patterns"
+    assert "sanitized_patterns" in server.audit_log.records[-1].details
+
+
+def test_graph_config_is_disabled_by_default(monkeypatch):
+    monkeypatch.delenv("ARGUS_NEO4J_ENABLED", raising=False)
+
+    config = GraphConfig.from_env()
+
+    assert config.enabled is False
+    assert config.uri == "bolt://127.0.0.1:7687"
+
+
 def test_forget_scope_purges_events_and_tombstones_raw_audit():
     store = InMemoryEventStore()
     event = store.add(
@@ -219,5 +275,6 @@ def test_forget_scope_removes_embedding_notes():
 
     assert result["events_removed"] == 1
     assert result["embedding_notes_removed"] == 1
+    assert result["graph_nodes_removed"] == 0
     assert server.store.get(note.event_id) is None
     assert search["matches"] == []

@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, Callable
 
 from .audit import AuditRecord, InMemoryAuditLog
 from .events import EventEnvelope
+from .graph import DisabledGraphAdapter
 from .policy import RedactionPolicy
 from .purge import ScopePurgeResult
 from .retrieval import InMemoryNoteIndex, RetrievalNote
@@ -52,11 +54,13 @@ class LocalMCPServer:
         policy: RedactionPolicy | None = None,
         audit_log: InMemoryAuditLog | None = None,
         note_index: Any | None = None,
+        graph: Any | None = None,
     ) -> None:
         self.store = store or InMemoryEventStore()
         self.policy = policy or RedactionPolicy()
         self.audit_log = audit_log or InMemoryAuditLog()
         self.note_index = note_index or InMemoryNoteIndex()
+        self.graph = graph or DisabledGraphAdapter()
         self.registry = ToolRegistry()
         self._register_default_tools()
 
@@ -87,6 +91,11 @@ class LocalMCPServer:
             "sensor_timeline_search",
             "Search local Argus timeline summaries without exposing raw payloads.",
             self.sensor_timeline_search,
+        )
+        self.registry.register(
+            "sensor_find_workflow_patterns",
+            "Find frequent local event transitions without exposing raw payloads.",
+            self.sensor_find_workflow_patterns,
         )
         self.registry.register(
             "sensor_pause_scope",
@@ -259,6 +268,43 @@ class LocalMCPServer:
         )
         return {"ok": True, "matches": matches}
 
+    def sensor_find_workflow_patterns(
+        self,
+        limit: int = 25,
+        actor: str = "hermes",
+    ) -> dict[str, Any]:
+        if getattr(self.graph, "enabled", False) and hasattr(self.graph, "workflow_patterns"):
+            result = self.graph.workflow_patterns(limit=limit)
+            patterns = result.get("patterns", [])
+            source = "neo4j"
+        else:
+            events = self.store.recent(limit=max(limit * 5, 50))
+            patterns = local_workflow_patterns(events, limit=limit)
+            source = "local_timeline"
+
+        self.audit_log.record(
+            AuditRecord(
+                actor=actor,
+                tool="sensor_find_workflow_patterns",
+                scope="workflow_patterns",
+                event_count=len(patterns),
+                redactions_applied=[],
+                allowed=True,
+                reason="redacted workflow pattern search",
+                details={
+                    "sanitized_patterns": patterns,
+                    "graph_enabled": bool(getattr(self.graph, "enabled", False)),
+                    "source": source,
+                },
+            )
+        )
+        return {
+            "ok": True,
+            "graph_enabled": bool(getattr(self.graph, "enabled", False)),
+            "source": source,
+            "patterns": patterns,
+        }
+
     def _match_from_note(self, note: RetrievalNote) -> dict[str, Any]:
         redacted_summary = self.policy.redact_value(note.summary).value
         return {
@@ -300,11 +346,17 @@ class LocalMCPServer:
             if hasattr(self.note_index, "forget_scope")
             else 0
         )
+        graph_nodes_removed = (
+            self.graph.forget_scope(scope)
+            if hasattr(self.graph, "forget_scope")
+            else 0
+        )
         result = ScopePurgeResult(
             scope=scope,
             events_removed=events_removed,
             audit_records_tombstoned=audit_records_tombstoned,
             embedding_notes_removed=embedding_notes_removed,
+            graph_nodes_removed=graph_nodes_removed,
         )
         self.audit_log.record(
             AuditRecord(
@@ -326,7 +378,11 @@ class LocalMCPServer:
                             if hasattr(self.note_index, "forget_scope")
                             else "not_configured"
                         ),
-                        "neo4j": "not_configured",
+                        "neo4j": (
+                            "purged"
+                            if getattr(self.graph, "enabled", False)
+                            else "disabled"
+                        ),
                         "retained_blobs": "not_configured",
                     },
                 },
@@ -353,3 +409,26 @@ class LocalMCPServer:
             )
         )
         return {"ok": True, "brief": notes}
+
+
+def local_workflow_patterns(events: list[EventEnvelope], *, limit: int = 25) -> list[dict[str, Any]]:
+    ordered = sorted(events, key=lambda event: parse_event_time(event.observed_at))
+    counts: dict[tuple[str, str], int] = {}
+    for previous, current in zip(ordered, ordered[1:]):
+        if previous.event_type.startswith("system.") or current.event_type.startswith("system."):
+            continue
+        key = (previous.event_type, current.event_type)
+        counts[key] = counts.get(key, 0) + 1
+    ranked = sorted(counts.items(), key=lambda item: item[1], reverse=True)
+    return [
+        {
+            "from_event_type": from_event_type,
+            "to_event_type": to_event_type,
+            "count": count,
+        }
+        for (from_event_type, to_event_type), count in ranked[:limit]
+    ]
+
+
+def parse_event_time(value: str) -> datetime:
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))

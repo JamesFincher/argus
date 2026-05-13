@@ -3,6 +3,7 @@
 from .audit import AuditRecord, InMemoryAuditLog
 from .events import EventEnvelope, Redaction, Relationship, make_event
 from .event_gateway import EventGateway
+from .graph import DisabledGraphAdapter, GraphConfig
 from .hermes_plugin import register
 from .mcp import LocalMCPServer, ToolRegistry
 from .metrics import METRIC_NAMES, MetricsRegistry
@@ -17,8 +18,10 @@ from .streams import RedisStreamConsumer, RedisStreamPublisher, StreamMessage, s
 
 __all__ = [
     "AuditRecord",
+    "DisabledGraphAdapter",
     "EventEnvelope",
     "EventGateway",
+    "GraphConfig",
     "HashEmbeddingModel",
     "InMemoryEventStore",
     "InMemoryAuditLog",

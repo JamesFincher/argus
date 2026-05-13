@@ -102,6 +102,10 @@ deterministic local embeddings for tests and offline operation; the
 `LanceDBNoteIndex` backend persists the same raw-free note records to a local
 LanceDB path when the optional `lancedb` package is installed.
 
+Neo4j remains optional and disabled by default. `sensor_find_workflow_patterns`
+falls back to local timeline transitions unless `ARGUS_NEO4J_ENABLED=1` and a
+Neo4j adapter are explicitly configured.
+
 ## macOS App
 
 Build the macOS Argus Sensor package target:
