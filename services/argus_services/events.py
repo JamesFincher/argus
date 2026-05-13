@@ -12,6 +12,8 @@ from uuid import UUID
 
 Sensitivity = Literal["low", "medium", "high", "blocked"]
 RawScope = Literal["none", "ephemeral", "durable-by-policy"]
+VALID_SENSITIVITIES = {"low", "medium", "high", "blocked"}
+VALID_RAW_SCOPES = {"none", "ephemeral", "durable-by-policy"}
 
 _EVENT_ID_LOCK = Lock()
 _LAST_EVENT_ID_MS = -1
@@ -106,6 +108,7 @@ class EventEnvelope:
     tags: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
+        self.validate()
         if self.dedupe_key is None:
             self.dedupe_key = stable_dedupe_key(
                 self.event_type,
@@ -114,6 +117,30 @@ class EventEnvelope:
                 self.observed_at,
                 self.payload,
             )
+
+    def validate(self) -> None:
+        required_strings = {
+            "event_id": self.event_id,
+            "event_type": self.event_type,
+            "schema_version": self.schema_version,
+            "source_device_id": self.source_device_id,
+            "source_platform": self.source_platform,
+            "sensor_id": self.sensor_id,
+            "sensor_version": self.sensor_version,
+            "observed_at": self.observed_at,
+            "ingested_at": self.ingested_at,
+        }
+        for field_name, value in required_strings.items():
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"{field_name} is required")
+        if self.sensitivity not in VALID_SENSITIVITIES:
+            raise ValueError(f"invalid sensitivity: {self.sensitivity!r}")
+        if self.raw_scope not in VALID_RAW_SCOPES:
+            raise ValueError(f"invalid raw_scope: {self.raw_scope!r}")
+        if not isinstance(self.payload, dict):
+            raise ValueError("payload must be an object")
+        if not isinstance(self.tags, list):
+            raise ValueError("tags must be a list")
 
     def to_dict(self) -> dict[str, Any]:
         return {

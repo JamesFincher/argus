@@ -1,7 +1,9 @@
 from datetime import datetime, timezone
 from uuid import UUID
 
-from argus_services.events import make_event, sortable_event_id
+import pytest
+
+from argus_services.events import EventEnvelope, make_event, sortable_event_id
 
 
 def test_sortable_event_ids_are_uuid7_and_lexically_ordered():
@@ -28,3 +30,27 @@ def test_default_event_envelope_uses_sortable_event_ids():
 
     assert UUID(first.event_id).version == 7
     assert first.event_id < second.event_id
+
+
+def test_event_envelope_rejects_invalid_contract_values():
+    with pytest.raises(ValueError, match="event_type is required"):
+        make_event("", {})
+    with pytest.raises(ValueError, match="invalid sensitivity"):
+        make_event("activity.browser_page", {}, sensitivity="secret")
+    with pytest.raises(ValueError, match="invalid raw_scope"):
+        make_event("activity.browser_page", {}, raw_scope="forever")
+    with pytest.raises(ValueError, match="payload must be an object"):
+        EventEnvelope(
+            event_type="activity.browser_page",
+            source_device_id="local",
+            source_platform="macos",
+            sensor_id="argus",
+            payload=[],
+        )
+    with pytest.raises(ValueError, match="tags must be a list"):
+        make_event("activity.browser_page", {}, tags="browser")
+
+
+def test_event_envelope_from_dict_still_reports_missing_required_fields():
+    with pytest.raises(TypeError, match="source_device_id"):
+        EventEnvelope.from_dict({"event_id": "evt"})
