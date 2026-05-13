@@ -95,8 +95,6 @@ def host_values(value: str) -> set[str]:
     parsed = urlparse(value if "://" in value else f"https://{value}")
     host = parsed.hostname or value
     normalized = normalize_value(host)
-    if normalized.startswith("www."):
-        normalized = normalized[4:]
     values = {normalized}
     parts = normalized.split(".")
     if len(parts) > 2:

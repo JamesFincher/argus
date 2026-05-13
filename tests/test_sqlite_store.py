@@ -8,6 +8,7 @@ from argus_services.policy import RedactionPolicy
 from argus_services.sqlite_store import (
     SQLiteAuditLog,
     SQLiteTimelineStore,
+    ensure_column,
     fts_query,
     semantic_scope_for,
 )
@@ -108,6 +109,7 @@ def test_sqlite_fts_search_uses_payload_summary_title_domain_and_tags(tmp_path):
 
         assert [event.event_id for event in store.search("vendor pricing")] == [pricing.event_id]
         assert [event.event_id for event in store.search("infra")] == [notes.event_id]
+        assert store.search("   ", limit=1)[0].event_id == notes.event_id
     finally:
         store.close()
 
@@ -145,6 +147,9 @@ def test_sqlite_ambient_summary_redacts_policy_sensitive_text(tmp_path):
     )
 
     try:
+        assert store.ambient_summary(policy=RedactionPolicy(), limit=1) == (
+            "Recent ambient context: no local sensor notes available."
+        )
         store.add(event)
         summary = store.ambient_summary(policy=RedactionPolicy(), limit=1)
 
@@ -235,6 +240,7 @@ def test_sqlite_audit_log_tombstones_matching_raw_event_details(tmp_path):
         assert details["raw_event"]["tombstoned"] is True
         assert details["raw_event"]["event_id"] == event.event_id
         assert "payload" not in details["raw_event"]
+        assert audit_log.tombstone_scope("missing") == 0
     finally:
         audit_log.close()
 
@@ -263,3 +269,18 @@ def test_sqlite_helpers_are_spec_aligned():
     assert semantic_scope_for(make_event("activity.focused_field", {})) == "focused_field"
     assert semantic_scope_for(make_event("system.permission_state", {})) == "system"
     assert fts_query('vendor "pricing"') == '"vendor" "pricing"'
+
+
+def test_sqlite_schema_helper_adds_missing_columns():
+    connection = sqlite3.connect(":memory:")
+    connection.row_factory = sqlite3.Row
+    try:
+        connection.execute("CREATE TABLE sample (id TEXT)")
+        ensure_column(connection, "sample", "added", "TEXT")
+        columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(sample)").fetchall()
+        }
+        assert "added" in columns
+    finally:
+        connection.close()

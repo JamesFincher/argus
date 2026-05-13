@@ -1,8 +1,10 @@
 from datetime import datetime, timezone
+import sys
+from types import SimpleNamespace
 
 import pytest
 
-from argus_services import storage_worker
+from argus_services import event_gateway, storage_worker
 from argus_services.audit import InMemoryAuditLog
 from argus_services.dashboard import dashboard_state, redis_status, sensor_health_state
 from argus_services.event_gateway import (
@@ -18,9 +20,9 @@ from argus_services.graph import (
     graph_from_config,
 )
 from argus_services.metrics import MetricsRegistry
-from argus_services.mcp import LocalMCPServer, ToolRegistry
-from argus_services.perception import TemplateSummarizer
-from argus_services.policy import RedactionPolicy
+from argus_services.mcp import LocalMCPServer, ToolRegistry, local_workflow_patterns
+from argus_services.perception import PerceptionWorker, TemplateSummarizer
+from argus_services.policy import RedactionPolicy, _looks_like_card
 from argus_services.purge import (
     host_values,
     normalize_scope,
@@ -34,10 +36,12 @@ from argus_services.retrieval import (
     cosine_similarity,
     note_from_event,
     note_from_record,
+    note_matches_scope,
     sql_quote,
     table_rows,
 )
 from argus_services.sqlite_store import SQLiteAuditLog, SQLiteTimelineStore
+from argus_services.streams import RAW_STREAMS
 from argus_services.storage_worker import (
     RedisToSQLiteWorker,
     StorageWorkerConfig,
@@ -118,6 +122,45 @@ class EmptyLanceDatabase:
         return []
 
 
+class ExistingLanceDatabase:
+    def __init__(self):
+        self.table = AppendableLanceTable()
+
+    def table_names(self):
+        return ["argus_notes"]
+
+    def open_table(self, name):
+        assert name == "argus_notes"
+        return self.table
+
+
+class AppendableLanceTable:
+    def __init__(self):
+        self.rows = []
+
+    def add(self, rows):
+        self.rows.extend(rows)
+
+    def search(self, _embedding):
+        return FakeLanceQuery(self.rows)
+
+    def to_list(self):
+        return list(self.rows)
+
+
+class FakeLanceQuery:
+    def __init__(self, rows):
+        self.rows = list(rows)
+        self.count = len(rows)
+
+    def limit(self, count):
+        self.count = count
+        return self
+
+    def to_list(self):
+        return self.rows[: self.count]
+
+
 class DeleteOnlyTable:
     def __init__(self):
         self.deleted = []
@@ -162,6 +205,15 @@ class EnabledGraph:
         return 4
 
 
+class StaticNoteIndex:
+    def search(self, _query, *, top_k):
+        assert top_k == 1
+        return [
+            note_from_record({"note_id": "note-1", "summary": "First", "sensitivity": "low"}),
+            note_from_record({"note_id": "note-2", "summary": "Second", "sensitivity": "low"}),
+        ]
+
+
 def test_event_gateway_forget_export_metrics_and_env_paths(tmp_path, monkeypatch):
     event = make_event(
         "activity.browser_page",
@@ -193,6 +245,26 @@ def test_event_gateway_forget_export_metrics_and_env_paths(tmp_path, monkeypatch
         store.close()
         audit_log.close()
 
+    original_run = event_gateway.run
+    calls = []
+    monkeypatch.setattr(event_gateway, "run", lambda **kwargs: calls.append(kwargs))
+    assert event_gateway.main(["--host", "localhost", "--port", "9999"]) == 0
+    assert calls == [{"host": "localhost", "port": 9999}]
+
+    class StoppingHTTPServer:
+        def __init__(self, address, handler):
+            self.address = address
+            self.handler = handler
+
+        def serve_forever(self):
+            raise StopIteration
+
+    monkeypatch.setattr(event_gateway, "ThreadingHTTPServer", StoppingHTTPServer)
+    monkeypatch.setattr(event_gateway, "store_from_env", lambda: InMemoryEventStore())
+    monkeypatch.setattr(event_gateway, "audit_log_from_env", lambda: InMemoryAuditLog())
+    with pytest.raises(StopIteration):
+        original_run(host="127.0.0.1", port=0)
+
 
 def test_dashboard_redis_errors_and_paused_health_rollups():
     assert redis_status(BrokenRedisStatus())["ping"] == "error"
@@ -216,7 +288,7 @@ def test_dashboard_redis_errors_and_paused_health_rollups():
     )
 
     health = sensor_health_state(
-        [older_permission, newer_permission, heartbeat],
+        [newer_permission, older_permission, heartbeat],
         paused_scopes={"macos"},
         now=datetime(2026, 5, 13, 14, 2, tzinfo=timezone.utc),
     )
@@ -232,6 +304,21 @@ def test_dashboard_redis_errors_and_paused_health_rollups():
         paused_scopes={"macos"},
     )
     assert state["redis"]["error"] == "redis down"
+
+
+def test_in_memory_store_prefix_forget_and_text_summary_edges():
+    keep = make_event("system.sensor_heartbeat", {"summary": "heartbeat"})
+    remove = make_event("activity.browser_page", {"summary": "Vendor page"})
+    long_text = make_event("activity.focused_field", {"text": "x" * 220})
+    store = InMemoryEventStore([keep, remove, long_text])
+
+    assert [event.event_id for event in store.recent(limit=2, event_type_prefix="activity.")] == [
+        long_text.event_id,
+        remove.event_id,
+    ]
+    assert store.forget_scope("missing") == 0
+    assert store.get(keep.event_id) is keep
+    assert store.summary_for(long_text) == "x" * 180
 
 
 def test_tool_registry_rejects_duplicate_and_unknown_tools():
@@ -283,6 +370,39 @@ def test_mcp_raw_paths_graph_enabled_and_store_summaries():
     assert store.summary_for(text) == "activity.focused_field from argus"
     assert store.summary_for(fallback) == "activity.unknown from argus"
 
+    pause = server.call_tool("sensor_pause_scope", scope="macos")
+    brief = server.call_tool("sensor_export_session_brief", limit=1)
+    limited = LocalMCPServer(note_index=StaticNoteIndex()).call_tool(
+        "sensor_timeline_search",
+        query="anything",
+        limit=1,
+    )
+
+    assert pause["status"] == "pause_requested"
+    assert brief["ok"] is True
+    assert len(limited["matches"]) == 1
+
+    fallback_search = LocalMCPServer(note_index=object())
+    fallback_search.add_event(make_event("activity.browser_page", {"summary": "Vendor A"}))
+    fallback_search.add_event(make_event("activity.browser_page", {"summary": "Vendor B"}))
+    limited_fallback = fallback_search.call_tool("sensor_timeline_search", query="vendor", limit=1)
+    assert len(limited_fallback["matches"]) == 1
+
+
+def test_local_workflow_patterns_skip_system_events():
+    patterns = local_workflow_patterns(
+        [
+            make_event("activity.a", {}, observed_at="2026-05-13T14:00:00Z"),
+            make_event("system.sensor_heartbeat", {}, observed_at="2026-05-13T14:01:00Z"),
+            make_event("activity.b", {}, observed_at="2026-05-13T14:02:00Z"),
+            make_event("activity.c", {}, observed_at="2026-05-13T14:03:00Z"),
+        ]
+    )
+
+    assert patterns == [
+        {"from_event_type": "activity.b", "to_event_type": "activity.c", "count": 1}
+    ]
+
 
 def test_metrics_registry_rejects_unknown_and_wrong_type_updates():
     registry = MetricsRegistry()
@@ -305,6 +425,27 @@ def test_graph_config_adapters_and_neo4j_query(monkeypatch):
     assert config.uri == "bolt://127.0.0.1:9999"
     assert config.database == "argus"
     assert isinstance(graph_from_config(GraphConfig(enabled=False)), DisabledGraphAdapter)
+
+    constructed = []
+
+    class FakeNeo4jGraphAdapter:
+        def __init__(self, config):
+            constructed.append(config)
+            self.enabled = True
+
+    monkeypatch.setattr("argus_services.graph.Neo4jGraphAdapter", FakeNeo4jGraphAdapter)
+    enabled_adapter = graph_from_config(GraphConfig(enabled=True, uri="bolt://patched"))
+    assert enabled_adapter.enabled is True
+    assert constructed[0].uri == "bolt://patched"
+
+    lazy_driver = FakeDriver()
+    monkeypatch.setitem(
+        sys.modules,
+        "neo4j",
+        SimpleNamespace(GraphDatabase=SimpleNamespace(driver=lambda uri: lazy_driver)),
+    )
+    lazy_adapter = Neo4jGraphAdapter(config=GraphConfig(enabled=True, uri="bolt://lazy"))
+    assert lazy_adapter.driver is lazy_driver
 
     disabled = DisabledGraphAdapter(reason="off")
     assert disabled.workflow_patterns(limit=1) == {"enabled": False, "reason": "off", "patterns": []}
@@ -364,13 +505,17 @@ def test_storage_worker_factory_main_and_idle_loop(tmp_path, monkeypatch, capsys
         )
     assert sleeper_worker.calls == [(1, 0)]
 
+    default_stream_worker = RedisToSQLiteWorker(consumer=object(), store=FakeStore())
+    assert default_stream_worker.streams == list(RAW_STREAMS.values())
 
-def test_retrieval_edges_for_embeddings_tables_and_records():
+
+def test_retrieval_edges_for_embeddings_tables_and_records(tmp_path, monkeypatch):
     assert HashEmbeddingModel(dimension=4).embed("   ") == [0.0, 0.0, 0.0, 0.0]
     assert cosine_similarity([], []) == 0.0
     assert cosine_similarity([1.0], [1.0, 2.0]) == 0.0
     assert sql_quote("vendor's") == "'vendor''s'"
     assert table_rows(FakePandasTable()) == [{"note_id": "n1", "summary": "Vendor", "sensitivity": "low"}]
+    assert table_rows(object()) == []
     assert note_from_record({"note_id": "n1", "summary": "S", "sensitivity": "low"}).source_event_ids == []
     assert note_from_event(make_event("activity.browser_page", {"summary": "no"}), HashEmbeddingModel()) is None
     assert note_from_event(
@@ -389,11 +534,45 @@ def test_retrieval_edges_for_embeddings_tables_and_records():
     assert index.search("", top_k=1) == []
     empty_index = LanceDBNoteIndex(path="/tmp/unused", database=EmptyLanceDatabase())
     assert empty_index.search("vendor") == []
+    assert empty_index.forget_scope("vendor") == 0
+
+    lazy_path = tmp_path / "lance"
+    monkeypatch.setitem(
+        sys.modules,
+        "lancedb",
+        SimpleNamespace(connect=lambda path: EmptyLanceDatabase()),
+    )
+    lazy_index = LanceDBNoteIndex(path=lazy_path)
+    assert lazy_index.table is None
+    assert lazy_path.is_dir()
+
+    existing_index = LanceDBNoteIndex(path="/tmp/unused", database=ExistingLanceDatabase())
+    note_event = make_event("perception.note", {"summary": "Vendor note"})
+    assert existing_index.add_event(note_event) is not None
+    assert existing_index.search("Vendor", top_k=1)[0].note_id == note_event.event_id
+    assert existing_index.forget_scope("missing") == 0
 
     table = DeleteOnlyTable()
     lancedb_index = LanceDBNoteIndex(path="/tmp/unused", database=object(), table=table)
     assert lancedb_index.forget_scope("vendor") == 1
     assert table.deleted == ["note_id IN ('note-1')"]
+    exact = note_from_record({"note_id": "n2", "summary": "Exact", "sensitivity": "low"})
+    assert note_matches_scope(exact, "all") is True
+    assert note_matches_scope(exact, "n2") is True
+
+    class FakeDigest:
+        def __init__(self, sign_byte):
+            self.sign_byte = sign_byte
+
+        def digest(self):
+            return b"\0\0\0\0" + bytes([self.sign_byte]) + b"\0\0\0"
+
+    signs = iter([0, 1])
+    monkeypatch.setattr(
+        "argus_services.retrieval.hashlib.blake2b",
+        lambda *_args, **_kwargs: FakeDigest(next(signs)),
+    )
+    assert HashEmbeddingModel(dimension=1).embed("one two") == [0.0]
 
 
 def test_perception_template_branches_and_compaction():
@@ -410,6 +589,15 @@ def test_perception_template_branches_and_compaction():
     assert TemplateSummarizer(max_chars=8).summarize(
         make_event("perception.note", {"summary": "this summary is too long"})
     ) == "this sum..."
+    assert summarizer.summarize(make_event("activity.frontmost_window", {"app": "broken"})) == (
+        "User focused an app"
+    )
+
+    normalized = PerceptionWorker().normalize(
+        make_event("Activity Mixed", {"Nested Key": ["  A   B  ", {"Number": 7}]})
+    )
+    assert normalized.event_type == "activity_mixed"
+    assert normalized.payload == {"nested_key": ["A B", {"number": 7}]}
 
 
 def test_policy_low_raw_access_blocked_apps_and_card_validation():
@@ -424,6 +612,8 @@ def test_policy_low_raw_access_blocked_apps_and_card_validation():
 
     assert "[REDACTED_CARD]" in redacted.payload["text"]
     assert "1234 5678 9012" in redacted.payload["text"]
+    assert _looks_like_card("123") is False
+    assert _looks_like_card("4012 8888 8888 1881") is True
 
 
 def test_purge_scope_matching_and_tombstone_edges():
@@ -445,6 +635,8 @@ def test_purge_scope_matching_and_tombstone_edges():
     assert scope_matches_event(event, "vendor.example") is True
     assert scope_matches_event(event, "alpha") is True
     assert scope_matches_event(event, "missing") is False
+    assert scope_matches_event(make_event("activity.browser_page", {"host": "deep.vendor.example"}), "vendor.example")
+    assert scope_matches_event(make_event("activity.browser_page", {}, tags=["   "]), "missing") is False
     with pytest.raises(ValueError, match="cannot be empty"):
         normalize_scope("  ")
 

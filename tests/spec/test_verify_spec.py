@@ -75,3 +75,12 @@ def test_main_returns_failure_when_required_text_is_missing(tmp_path: Path) -> N
     exit_code = verify_spec.main(["--root", str(tmp_path)])
 
     assert exit_code == 1
+
+
+def test_main_returns_success_for_complete_scaffold(tmp_path: Path, capsys) -> None:
+    create_valid_scaffold(tmp_path)
+
+    exit_code = verify_spec.main(["--root", str(tmp_path)])
+
+    assert exit_code == 0
+    assert "PASS Argus spec scaffold verification complete" in capsys.readouterr().out

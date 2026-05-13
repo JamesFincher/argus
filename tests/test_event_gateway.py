@@ -183,6 +183,23 @@ def test_gateway_http_error_and_control_routes():
             method="POST",
         )
         assert json.loads(urllib.request.urlopen(resume, timeout=5).read())["status"] == "active"
+        default_resume = urllib.request.Request(
+            f"{base_url}/control/resume",
+            data=b"",
+            method="POST",
+        )
+        assert json.loads(urllib.request.urlopen(default_resume, timeout=5).read())["scope"] == "macos"
+
+        event = make_event("activity.browser_page", {"title": "HTTP"}, source_platform="macos").to_dict()
+        good_event = urllib.request.Request(
+            f"{base_url}/events",
+            data=json.dumps(event).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        accepted = json.loads(urllib.request.urlopen(good_event, timeout=5).read())
+        assert accepted["ok"] is True
+        assert accepted["event_id"] == event["event_id"]
 
         forget = urllib.request.Request(f"{base_url}/control/forget", data=b"{}", method="POST")
         try:
@@ -192,6 +209,20 @@ def test_gateway_http_error_and_control_routes():
             assert "scope is required" in exc.read().decode("utf-8")
         else:
             raise AssertionError("forget without scope should fail")
+
+        blank_forget = urllib.request.Request(
+            f"{base_url}/control/forget",
+            data=b"scope=+++",
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            method="POST",
+        )
+        try:
+            urllib.request.urlopen(blank_forget, timeout=5)
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 400
+            assert "cannot be empty" in exc.read().decode("utf-8")
+        else:
+            raise AssertionError("blank forget scope should fail")
 
         unknown = urllib.request.Request(f"{base_url}/unknown", data=b"{}", method="POST")
         try:
