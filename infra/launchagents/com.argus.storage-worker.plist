@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.argus.storage-worker</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/env</string>
+    <string>bash</string>
+    <string>-lc</string>
+    <string>cd "$HOME/code/argus/argus" &amp;&amp; export ARGUS_TIMELINE_DB_PATH="$HOME/Library/Application Support/Argus/timeline.db" &amp;&amp; scripts/dev/run_storage_worker.sh</string>
+  </array>
+  <key>RunAtLoad</key>
+  <false/>
+  <key>KeepAlive</key>
+  <false/>
+  <key>StandardOutPath</key>
+  <string>/tmp/argus-storage-worker.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/argus-storage-worker.err.log</string>
+</dict>
+</plist>

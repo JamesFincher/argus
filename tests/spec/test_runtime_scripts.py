@@ -36,3 +36,26 @@ def test_status_script_reports_mesh_and_gateway():
 
     assert "docker compose -f infra/compose.yaml ps" in script
     assert "http://${HOST}:${PORT}/health" in script
+    assert "Storage worker" in script
+
+
+def test_storage_worker_scripts_use_services_pythonpath_and_timeline_db():
+    run_script = read("scripts/dev/run_storage_worker.sh")
+    start_script = read("scripts/dev/start_storage_worker.sh")
+    stop_script = read("scripts/dev/stop_storage_worker.sh")
+
+    assert "ARGUS_TIMELINE_DB_PATH" in run_script
+    assert "PYTHONPATH" in run_script
+    assert "argus_services.storage_worker import main" in run_script
+    assert "ARGUS_STORAGE_WORKER_PID_FILE" in start_script
+    assert "ARGUS_STORAGE_WORKER_LOG_FILE" in start_script
+    assert "ARGUS_STORAGE_WORKER_ERR_FILE" in start_script
+    assert "ARGUS_STORAGE_WORKER_PID_FILE" in stop_script
+
+
+def test_storage_worker_launchagent_points_at_repo_script():
+    plist = read("infra/launchagents/com.argus.storage-worker.plist")
+
+    assert "com.argus.storage-worker" in plist
+    assert "scripts/dev/run_storage_worker.sh" in plist
+    assert "ARGUS_TIMELINE_DB_PATH" in plist

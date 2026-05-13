@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 from argus_services.event_gateway import EventGateway
 from argus_services.events import make_event
 from argus_services.sqlite_store import SQLiteTimelineStore
-from argus_services.storage_worker import RedisToSQLiteWorker
+from argus_services.storage_worker import RedisToSQLiteWorker, StorageWorkerConfig, run_worker
 from argus_services.streams import (
     DLQ_STREAM,
     RedisStreamConsumer,
@@ -302,5 +302,53 @@ def test_redis_to_sqlite_worker_dead_letters_unparseable_messages(tmp_path):
         assert stored == 0
         assert consumer.acked == []
         assert consumer.dead_lettered[0][0:2] == ("stream:raw:macos", "bad-0")
+    finally:
+        store.close()
+
+
+def test_storage_worker_config_reads_environment(monkeypatch):
+    monkeypatch.setenv("ARGUS_TIMELINE_DB_PATH", "/tmp/argus-test.db")
+    monkeypatch.setenv("ARGUS_REDIS_HOST", "127.0.0.2")
+    monkeypatch.setenv("ARGUS_REDIS_PORT", "6380")
+    monkeypatch.setenv("ARGUS_STORAGE_WORKER_GROUP", "cg-storage-test")
+    monkeypatch.setenv("ARGUS_STORAGE_WORKER_CONSUMER", "worker-test")
+    monkeypatch.setenv("ARGUS_STORAGE_WORKER_STREAMS", "stream:raw:macos,stream:raw:ios")
+    monkeypatch.setenv("ARGUS_STORAGE_WORKER_COUNT", "7")
+    monkeypatch.setenv("ARGUS_STORAGE_WORKER_BLOCK_MS", "50")
+
+    config = StorageWorkerConfig.from_env()
+
+    assert config.timeline_db_path == "/tmp/argus-test.db"
+    assert config.redis_host == "127.0.0.2"
+    assert config.redis_port == 6380
+    assert config.group == "cg-storage-test"
+    assert config.consumer_name == "worker-test"
+    assert config.streams == ("stream:raw:macos", "stream:raw:ios")
+    assert config.count == 7
+    assert config.block_ms == 50
+
+
+def test_run_worker_once_ensures_groups_and_returns_processed_count(tmp_path):
+    event = make_event("activity.browser_page", {"title": "once"}, source_platform="macos")
+    message = StreamMessage("stream:raw:macos", "1778682379180-0", xadd_fields(event))
+    consumer = FakeStreamConsumer([message])
+    store = SQLiteTimelineStore(tmp_path / "timeline.db")
+
+    try:
+        worker = RedisToSQLiteWorker(
+            consumer=consumer,
+            store=store,
+            streams=["stream:raw:macos"],
+        )
+        processed = run_worker(
+            worker,
+            count=10,
+            block_ms=0,
+            idle_sleep_seconds=0,
+            once=True,
+        )
+
+        assert processed == 1
+        assert consumer.groups == ["stream:raw:macos"]
     finally:
         store.close()

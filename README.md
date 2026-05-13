@@ -66,6 +66,19 @@ The dashboard separates raw local events from sanitized Hermes-facing outputs,
 shows the audit trail, reports Redis stream status, and exposes pause/resume
 controls for gateway ingest.
 
+Run the Redis-to-SQLite storage worker in the foreground:
+
+```sh
+scripts/dev/run_storage_worker.sh
+```
+
+Or run it in the background:
+
+```sh
+scripts/dev/start_storage_worker.sh
+scripts/dev/status_stack.sh
+```
+
 Set `ARGUS_TIMELINE_DB_PATH` to persist gateway-ingested events into the local
 SQLite + FTS5 timeline:
 
