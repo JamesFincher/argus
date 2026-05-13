@@ -40,10 +40,10 @@ class InMemoryEventStore:
         return "Recent ambient context:\n" + "\n".join(notes)
 
     def summary_for(self, event: EventEnvelope) -> str:
-        return _event_summary(event)
+        return event_summary(event)
 
 
-def _event_summary(event: EventEnvelope) -> str:
+def event_summary(event: EventEnvelope) -> str:
     payload = event.payload
     if isinstance(payload.get("summary"), str):
         return payload["summary"]

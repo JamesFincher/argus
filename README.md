@@ -56,6 +56,14 @@ scripts/dev/start_event_gateway.sh
 scripts/dev/status_stack.sh
 ```
 
+Set `ARGUS_TIMELINE_DB_PATH` to persist gateway-ingested events into the local
+SQLite + FTS5 timeline:
+
+```sh
+ARGUS_TIMELINE_DB_PATH="$HOME/Library/Application Support/Argus/timeline.db" \
+  scripts/dev/start_event_gateway.sh
+```
+
 The Docker Compose stack publishes Redis, Neo4j, Prometheus, and Grafana only
 on `127.0.0.1` by default. Redis protected mode is disabled for this local
 stack so the host event gateway can write through Docker's loopback-published

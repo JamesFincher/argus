@@ -9,12 +9,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 from .events import EventEnvelope
 from .policy import RedactionPolicy
+from .sqlite_store import SQLiteTimelineStore
 from .store import InMemoryEventStore
 from .streams import RedisStreamPublisher, StreamPublisher, stream_for_event
 
@@ -116,9 +118,16 @@ def make_handler(gateway: EventGateway) -> type[BaseHTTPRequestHandler]:
 def run(host: str = "127.0.0.1", port: int = 8765) -> None:
     if host not in LOOPBACK_HOSTS:
         raise ValueError(f"Argus event gateway only binds to loopback hosts, got {host!r}")
-    gateway = EventGateway()
+    gateway = EventGateway(store=store_from_env())
     server = ThreadingHTTPServer((host, port), make_handler(gateway))
     server.serve_forever()
+
+
+def store_from_env() -> InMemoryEventStore | SQLiteTimelineStore:
+    db_path = os.environ.get("ARGUS_TIMELINE_DB_PATH")
+    if not db_path:
+        return InMemoryEventStore()
+    return SQLiteTimelineStore(db_path)
 
 
 def main(argv: list[str] | None = None) -> int:
