@@ -1,6 +1,9 @@
 from dataclasses import dataclass, field
+from http.server import ThreadingHTTPServer
+import threading
+import urllib.request
 
-from argus_services.event_gateway import EventGateway, run
+from argus_services.event_gateway import EventGateway, make_handler, run
 from argus_services.events import make_event
 from argus_services.streams import (
     POLICY_BLOCKED_STREAM,
@@ -125,6 +128,34 @@ def test_gateway_routes_blocked_surfaces_to_policy_stream():
     assert stored is not None
     assert stored.sensitivity == "blocked"
     assert "policy_blocked_surface" in stored.tags
+
+
+def test_gateway_metrics_endpoint_is_loopback_prometheus_text():
+    gateway = EventGateway(publisher=RecordingPublisher())
+    gateway.ingest(
+        make_event(
+            "activity.browser_page",
+            {"domain": "accounts.google.com", "title": "Sign in"},
+            source_platform="macos",
+        )
+    )
+    server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(gateway))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base_url = f"http://127.0.0.1:{server.server_address[1]}"
+
+    try:
+        response = urllib.request.urlopen(f"{base_url}/metrics", timeout=5)
+        body = response.read().decode("utf-8")
+
+        assert response.headers["Content-Type"].startswith("text/plain")
+        assert "# TYPE argus_events_ingested_total counter" in body
+        assert "argus_events_ingested_total 1" in body
+        assert "argus_policy_blocks_total 1" in body
+        assert "argus_sensor_bytes_written_total " in body
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
 
 
 def test_gateway_refuses_non_loopback_bind():

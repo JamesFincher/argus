@@ -18,6 +18,7 @@ from urllib.parse import parse_qs
 from .audit import AuditRecord, InMemoryAuditLog
 from .dashboard import dashboard_state, render_dashboard_html
 from .events import EventEnvelope
+from .metrics import MetricsRegistry
 from .policy import RedactionPolicy
 from .purge import ScopePurgeResult
 from .sqlite_store import SQLiteAuditLog, SQLiteTimelineStore
@@ -58,11 +59,13 @@ class EventGateway:
         policy: RedactionPolicy | None = None,
         publisher: StreamPublisher | None = None,
         audit_log: InMemoryAuditLog | SQLiteAuditLog | None = None,
+        metrics: MetricsRegistry | None = None,
     ) -> None:
         self.store = store or InMemoryEventStore()
         self.policy = policy or RedactionPolicy()
         self.publisher = publisher or RedisStreamPublisher()
         self.audit_log = audit_log or InMemoryAuditLog()
+        self.metrics = metrics or MetricsRegistry()
         self.paused_scopes: set[str] = set()
 
     def ingest_dict(self, data: dict[str, Any]) -> IngestResult:
@@ -83,6 +86,7 @@ class EventGateway:
         stream = stream_for_event(event)
         self.store.add(event)
         redis_id = self.publisher.publish(stream, event)
+        self._record_ingest_metrics(event)
         self.audit_log.record(
             AuditRecord(
                 actor="argus-event-gateway",
@@ -105,6 +109,17 @@ class EventGateway:
             redis_id=redis_id,
             sensitivity=event.sensitivity,
         )
+
+    def _record_ingest_metrics(self, event: EventEnvelope) -> None:
+        self.metrics.increment("events_ingested_total")
+        self.metrics.increment(
+            "sensor_bytes_written_total",
+            len(json.dumps(event.to_dict(), sort_keys=True).encode("utf-8")),
+        )
+        if event.sensitivity == "blocked":
+            self.metrics.increment("policy_blocks_total")
+        if event.redactions:
+            self.metrics.increment("redactions_applied_total", len(event.redactions))
 
     def pause_scope(self, scope: str = "macos") -> None:
         self.paused_scopes.add(scope)
@@ -220,6 +235,9 @@ def make_handler(gateway: EventGateway) -> type[BaseHTTPRequestHandler]:
             if self.path == "/dashboard":
                 self._write_html(200, render_dashboard_html(gateway.dashboard_state()))
                 return
+            if self.path == "/metrics":
+                self._write_text(200, gateway.metrics.render_prometheus())
+                return
             self._write_json(404, {"ok": False, "error": "not found"})
 
         def do_POST(self) -> None:
@@ -283,6 +301,14 @@ def make_handler(gateway: EventGateway) -> type[BaseHTTPRequestHandler]:
             body = body_text.encode("utf-8")
             self.send_response(status_code)
             self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def _write_text(self, status_code: int, body_text: str) -> None:
+            body = body_text.encode("utf-8")
+            self.send_response(status_code)
+            self.send_header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)

@@ -104,6 +104,8 @@ def test_metrics_registry_renders_required_prometheus_names():
     registry = MetricsRegistry()
     registry.increment("events_ingested_total", 2)
     registry.increment("policy_blocks_total")
+    registry.increment("sensor_bytes_written_total", 42)
+    registry.set_gauge("redis_stream_pending", 3)
     output = registry.render_prometheus()
 
     assert {
@@ -111,9 +113,17 @@ def test_metrics_registry_renders_required_prometheus_names():
         "redactions_applied_total",
         "mcp_tool_calls_total",
         "policy_blocks_total",
+        "sensor_bytes_written_total",
+        "redis_stream_pending",
+        "worker_latency_p95_ms",
+        "blocked_event_rate",
+        "redaction_hit_rate",
     } <= METRIC_NAMES
+    assert "# TYPE argus_redis_stream_pending gauge" in output
     assert "argus_events_ingested_total 2" in output
     assert "argus_policy_blocks_total 1" in output
+    assert "argus_sensor_bytes_written_total 42" in output
+    assert "argus_redis_stream_pending 3" in output
 
 
 class FakeLanceDatabase:

@@ -65,6 +65,8 @@ open http://127.0.0.1:8765/dashboard
 The dashboard separates raw local events from sanitized Hermes-facing outputs,
 shows the audit trail, reports Redis stream status, and exposes pause/resume,
 scoped forget, and redacted session-export controls for gateway ingest.
+Prometheus text metrics are available from the same loopback service at
+`http://127.0.0.1:8765/metrics`.
 
 Run the Redis-to-SQLite storage worker in the foreground:
 
