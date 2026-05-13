@@ -59,6 +59,7 @@ public enum ArgusEventKind: String, Codable, Equatable, Sendable {
     case userShare = "user_share"
     case permissionState = "permission_state"
     case sensorHeartbeat = "sensor_heartbeat"
+    case systemError = "system_error"
     case sensorControl = "sensor_control"
     case appLifecycle = "app_lifecycle"
 }

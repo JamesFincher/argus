@@ -77,6 +77,46 @@ public enum ArgusEventFactory {
         )
     }
 
+    public static func sensorHeartbeat(
+        status: String,
+        intervalSeconds: Int,
+        mode: String = "active",
+        sensorID: String = "argus-sensor-mac",
+        source: String = "macos.sensor_runtime"
+    ) -> ArgusEventEnvelope {
+        ArgusEventEnvelope(
+            platform: .macOS,
+            source: source,
+            kind: .sensorHeartbeat,
+            summary: "Sensor heartbeat: \(sensorID) \(status)",
+            payload: [
+                "sensor_id": .string(sensorID),
+                "status": .string(status),
+                "interval_seconds": .int(intervalSeconds),
+                "mode": .string(mode)
+            ],
+            sensitivity: .low
+        )
+    }
+
+    public static func systemError(
+        message: String,
+        stage: String,
+        source: String = "macos.sensor_runtime"
+    ) -> ArgusEventEnvelope {
+        ArgusEventEnvelope(
+            platform: .macOS,
+            source: source,
+            kind: .systemError,
+            summary: "Sensor error at \(stage): \(message)",
+            payload: [
+                "stage": .string(stage),
+                "message": .string(message)
+            ],
+            sensitivity: .medium
+        )
+    }
+
     public static func appLifecycle(
         bundleID: String?,
         appName: String,

@@ -131,6 +131,8 @@ private extension ArgusEventKind {
             return "system.permission_state"
         case .sensorHeartbeat:
             return "system.sensor_heartbeat"
+        case .systemError:
+            return "system.error"
         case .sensorControl:
             return "system.sensor_control"
         case .appLifecycle:

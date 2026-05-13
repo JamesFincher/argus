@@ -106,6 +106,48 @@ Neo4j remains optional and disabled by default. `sensor_find_workflow_patterns`
 falls back to local timeline transitions unless `ARGUS_NEO4J_ENABLED=1` and a
 Neo4j adapter are explicitly configured.
 
+## Hermes MCP Transport
+
+Argus exposes the local sensor tools over stdio JSON-RPC for Hermes. The package
+installs three compatible launcher names that all run the same transport:
+`argus-mcp-stdio`, `argus-sensor-mcp`, and `hermes-sensor-mcp`.
+
+Minimal tool-list smoke test:
+
+```sh
+printf '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}\n' \
+  | ARGUS_TIMELINE_DB_PATH="$HOME/Library/Application Support/Argus/timeline.db" \
+    uv run argus-sensor-mcp
+```
+
+Hermes config can point at the same command:
+
+```yaml
+mcp_servers:
+  sensor:
+    command: "uv"
+    args: ["run", "argus-sensor-mcp"]
+    env:
+      ARGUS_TIMELINE_DB_PATH: "/Users/james/Library/Application Support/Argus/timeline.db"
+```
+
+MCP tools return sanitized content by default. Full raw event expansion remains
+policy-gated and every agent-facing call records an audit entry in the local
+audit store.
+
+## Browser Native Host
+
+`argus-native-host` implements the browser native messaging protocol for Safari
+or WebExtension page-context events. It reads framed JSON messages from stdin,
+validates HTTP/HTTPS page context, converts them into canonical
+`activity.browser_page` events, and posts them to the loopback gateway at
+`http://127.0.0.1:8765/events` by default. Override the target only with another
+loopback `/events` URL:
+
+```sh
+ARGUS_EVENT_GATEWAY_URL="http://127.0.0.1:8765/events" uv run argus-native-host
+```
+
 ## macOS App
 
 Build the macOS Argus Sensor package target:

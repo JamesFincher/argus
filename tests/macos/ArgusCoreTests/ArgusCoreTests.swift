@@ -281,6 +281,35 @@ final class ArgusCoreTests: XCTestCase {
         XCTAssertEqual(event.payload["scope"], .string("macos"))
     }
 
+    func testSensorHeartbeatFactoryEmitsSystemHeartbeatEvent() {
+        let event = ArgusEventFactory.sensorHeartbeat(
+            status: "ok",
+            intervalSeconds: 30,
+            mode: "active"
+        )
+        let gateway = event.gatewayEnvelope(sourceDeviceID: "macbook-test")
+
+        XCTAssertEqual(event.kind, .sensorHeartbeat)
+        XCTAssertEqual(event.sensitivity, .low)
+        XCTAssertEqual(event.payload["sensor_id"], .string("argus-sensor-mac"))
+        XCTAssertEqual(event.payload["interval_seconds"], .int(30))
+        XCTAssertEqual(event.payload["mode"], .string("active"))
+        XCTAssertEqual(gateway.eventType, "system.sensor_heartbeat")
+        XCTAssertEqual(gateway.rawScope, "none")
+    }
+
+    func testSystemErrorFactoryEmitsSystemErrorEvent() {
+        let event = ArgusEventFactory.systemError(message: "gateway down", stage: "event_sink")
+        let gateway = event.gatewayEnvelope(sourceDeviceID: "macbook-test")
+
+        XCTAssertEqual(event.kind, .systemError)
+        XCTAssertEqual(event.sensitivity, .medium)
+        XCTAssertEqual(event.payload["stage"], .string("event_sink"))
+        XCTAssertEqual(event.payload["message"], .string("gateway down"))
+        XCTAssertEqual(gateway.eventType, "system.error")
+        XCTAssertEqual(gateway.rawScope, "none")
+    }
+
     func testPermissionOnboardingOrdersAccessibilityBeforeScreenRecordingFallback() {
         XCTAssertEqual(
             PermissionOnboardingState(
