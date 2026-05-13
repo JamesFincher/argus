@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS audit_records (
   redactions_json TEXT NOT NULL DEFAULT '[]',
   allowed INTEGER NOT NULL CHECK (allowed IN (0, 1)),
   reason TEXT NOT NULL,
+  details_json TEXT NOT NULL DEFAULT '{}',
   recorded_at TEXT NOT NULL
 );
 

@@ -38,6 +38,7 @@ class SQLiteTimelineStore:
     def apply_migrations(self) -> None:
         with self._lock:
             self.connection.executescript(self.migration_path.read_text(encoding="utf-8"))
+            ensure_column(self.connection, "audit_records", "details_json", "TEXT NOT NULL DEFAULT '{}'")
             self.connection.commit()
 
     def close(self) -> None:
@@ -193,6 +194,7 @@ class SQLiteAuditLog:
     def apply_migrations(self) -> None:
         with self._lock:
             self.connection.executescript(self.migration_path.read_text(encoding="utf-8"))
+            ensure_column(self.connection, "audit_records", "details_json", "TEXT NOT NULL DEFAULT '{}'")
             self.connection.commit()
 
     def close(self) -> None:
@@ -211,9 +213,10 @@ class SQLiteAuditLog:
                   redactions_json,
                   allowed,
                   reason,
+                  details_json,
                   recorded_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     record.actor,
@@ -223,6 +226,7 @@ class SQLiteAuditLog:
                     _json(record.redactions_applied),
                     1 if record.allowed else 0,
                     record.reason,
+                    _json(record.details),
                     record.recorded_at,
                 ),
             )
@@ -276,8 +280,23 @@ def audit_record_from_row(row: sqlite3.Row) -> AuditRecord:
         redactions_applied=json.loads(row["redactions_json"]),
         allowed=bool(row["allowed"]),
         reason=row["reason"],
+        details=json.loads(row["details_json"]),
         recorded_at=row["recorded_at"],
     )
+
+
+def ensure_column(
+    connection: sqlite3.Connection,
+    table: str,
+    column: str,
+    declaration: str,
+) -> None:
+    columns = {
+        row["name"]
+        for row in connection.execute(f"PRAGMA table_info({table})").fetchall()
+    }
+    if column not in columns:
+        connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
 
 
 def semantic_scope_for(event: EventEnvelope) -> str:

@@ -56,6 +56,16 @@ scripts/dev/start_event_gateway.sh
 scripts/dev/status_stack.sh
 ```
 
+Open the local ArgusOS dashboard while the gateway is running:
+
+```sh
+open http://127.0.0.1:8765/dashboard
+```
+
+The dashboard separates raw local events from sanitized Hermes-facing outputs,
+shows the audit trail, reports Redis stream status, and exposes pause/resume
+controls for gateway ingest.
+
 Set `ARGUS_TIMELINE_DB_PATH` to persist gateway-ingested events into the local
 SQLite + FTS5 timeline:
 

@@ -22,6 +22,17 @@ SYSTEM_METRICS_STREAM = "stream:system:metrics"
 DLQ_STREAM = "stream:dlq"
 
 
+@dataclass(frozen=True)
+class StreamMessage:
+    stream: str
+    redis_id: str
+    fields: dict[str, str]
+
+    @property
+    def event_id(self) -> str:
+        return self.fields.get("event_id", "")
+
+
 def stream_for_event(event: EventEnvelope) -> str:
     if event.event_type.startswith("perception.") or event.event_type.startswith("derived."):
         return DERIVED_NOTES_STREAM
@@ -55,6 +66,11 @@ class StreamPublisher(Protocol):
         ...
 
 
+class RedisCommandExecutor(Protocol):
+    def execute(self, command: list[str]) -> Any:
+        ...
+
+
 @dataclass(frozen=True)
 class RedisStreamPublisher:
     host: str = "127.0.0.1"
@@ -71,6 +87,139 @@ class RedisStreamPublisher:
             sock.sendall(_encode_resp(command))
             return _read_resp_string(sock)
 
+    def execute(self, command: list[str]) -> Any:
+        with socket.create_connection((self.host, self.port), timeout=self.timeout_seconds) as sock:
+            sock.sendall(_encode_resp(command))
+            return _read_resp(sock)
+
+
+@dataclass(frozen=True)
+class RedisStreamConsumer:
+    group: str
+    consumer_name: str
+    executor: RedisCommandExecutor | None = None
+    publisher: RedisStreamPublisher | None = None
+    max_attempts: int = 3
+
+    def __post_init__(self) -> None:
+        if self.executor is None:
+            object.__setattr__(self, "executor", self.publisher or RedisStreamPublisher())
+
+    def ensure_group(self, stream: str, start_id: str = "0") -> None:
+        assert self.executor is not None
+        try:
+            self.executor.execute(["XGROUP", "CREATE", stream, self.group, start_id, "MKSTREAM"])
+        except RuntimeError as exc:
+            if "BUSYGROUP" not in str(exc):
+                raise
+
+    def read(self, streams: list[str], *, count: int = 10, block_ms: int = 0) -> list[StreamMessage]:
+        assert self.executor is not None
+        response = self.executor.execute(
+            [
+                "XREADGROUP",
+                "GROUP",
+                self.group,
+                self.consumer_name,
+                "COUNT",
+                str(count),
+                "BLOCK",
+                str(block_ms),
+                "STREAMS",
+                *streams,
+                *((">" for _ in streams)),
+            ]
+        )
+        return parse_xreadgroup(response)
+
+    def ack(self, stream: str, *redis_ids: str) -> int:
+        if not redis_ids:
+            return 0
+        assert self.executor is not None
+        response = self.executor.execute(["XACK", stream, self.group, *redis_ids])
+        return int(response)
+
+    def pending(self, stream: str, *, count: int = 10) -> list[dict[str, Any]]:
+        assert self.executor is not None
+        response = self.executor.execute(
+            [
+                "XPENDING",
+                stream,
+                self.group,
+                "-",
+                "+",
+                str(count),
+                self.consumer_name,
+            ]
+        )
+        return parse_xpending(response)
+
+    def reclaim_stale(
+        self,
+        stream: str,
+        *,
+        min_idle_ms: int,
+        count: int = 10,
+    ) -> list[StreamMessage]:
+        pending = self.pending(stream, count=count)
+        retry_ids = [
+            item["redis_id"]
+            for item in pending
+            if item["delivery_count"] < self.max_attempts
+        ]
+        dlq_ids = [
+            item["redis_id"]
+            for item in pending
+            if item["delivery_count"] >= self.max_attempts
+        ]
+
+        if dlq_ids:
+            self.dead_letter(stream, *dlq_ids, reason="max_attempts_exceeded")
+
+        if not retry_ids:
+            return []
+
+        assert self.executor is not None
+        response = self.executor.execute(
+            [
+                "XCLAIM",
+                stream,
+                self.group,
+                self.consumer_name,
+                str(min_idle_ms),
+                *retry_ids,
+            ]
+        )
+        return [
+            StreamMessage(stream=stream, redis_id=redis_id, fields=fields_from_pairs(pairs))
+            for redis_id, pairs in response
+        ]
+
+    def dead_letter(self, stream: str, *redis_ids: str, reason: str) -> list[str]:
+        if not redis_ids:
+            return []
+        assert self.executor is not None
+        dlq_entries = []
+        for redis_id in redis_ids:
+            response = self.executor.execute(
+                [
+                    "XADD",
+                    DLQ_STREAM,
+                    "*",
+                    "source_stream",
+                    stream,
+                    "source_redis_id",
+                    redis_id,
+                    "group",
+                    self.group,
+                    "reason",
+                    reason,
+                ]
+            )
+            dlq_entries.append(str(response))
+        self.ack(stream, *redis_ids)
+        return dlq_entries
+
 
 def _encode_resp(values: list[str]) -> bytes:
     chunks = [f"*{len(values)}\r\n".encode("utf-8")]
@@ -82,20 +231,71 @@ def _encode_resp(values: list[str]) -> bytes:
     return b"".join(chunks)
 
 
-def _read_resp_string(sock: socket.socket) -> str:
+def parse_xreadgroup(response: Any) -> list[StreamMessage]:
+    if response in (None, []):
+        return []
+    messages: list[StreamMessage] = []
+    for stream_name, entries in response:
+        for redis_id, pairs in entries:
+            messages.append(
+                StreamMessage(
+                    stream=stream_name,
+                    redis_id=redis_id,
+                    fields=fields_from_pairs(pairs),
+                )
+            )
+    return messages
+
+
+def parse_xpending(response: Any) -> list[dict[str, Any]]:
+    return [
+        {
+            "redis_id": item[0],
+            "consumer": item[1],
+            "idle_ms": int(item[2]),
+            "delivery_count": int(item[3]),
+        }
+        for item in response or []
+    ]
+
+
+def fields_from_pairs(pairs: list[str]) -> dict[str, str]:
+    return {
+        str(pairs[index]): str(pairs[index + 1])
+        for index in range(0, len(pairs), 2)
+    }
+
+
+def _read_resp(sock: socket.socket) -> Any:
     prefix = sock.recv(1)
     if prefix == b"+":
         return _read_line(sock)
+    if prefix == b":":
+        return int(_read_line(sock))
     if prefix == b"$":
         length = int(_read_line(sock))
+        if length == -1:
+            return None
         data = _read_exact(sock, length)
         _read_exact(sock, 2)
         return data.decode("utf-8")
+    if prefix == b"*":
+        length = int(_read_line(sock))
+        if length == -1:
+            return None
+        return [_read_resp(sock) for _ in range(length)]
     if prefix == b"-":
         raise RuntimeError(_read_line(sock))
     if prefix == b"":
         raise RuntimeError("redis connection closed")
     raise RuntimeError(f"unexpected redis response prefix: {prefix!r}")
+
+
+def _read_resp_string(sock: socket.socket) -> str:
+    response = _read_resp(sock)
+    if isinstance(response, str):
+        return response
+    raise RuntimeError(f"expected redis string response, got {response!r}")
 
 
 def _read_line(sock: socket.socket) -> str:

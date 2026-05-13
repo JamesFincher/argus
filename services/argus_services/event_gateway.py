@@ -14,9 +14,11 @@ from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
+from .audit import AuditRecord, InMemoryAuditLog
+from .dashboard import dashboard_state, render_dashboard_html
 from .events import EventEnvelope
 from .policy import RedactionPolicy
-from .sqlite_store import SQLiteTimelineStore
+from .sqlite_store import SQLiteAuditLog, SQLiteTimelineStore
 from .store import InMemoryEventStore
 from .streams import RedisStreamPublisher, StreamPublisher, stream_for_event
 
@@ -40,6 +42,12 @@ class IngestResult:
         }
 
 
+class PausedScopeError(RuntimeError):
+    def __init__(self, scope: str) -> None:
+        super().__init__(f"sensor ingest paused for scope: {scope}")
+        self.scope = scope
+
+
 class EventGateway:
     def __init__(
         self,
@@ -47,16 +55,22 @@ class EventGateway:
         store: InMemoryEventStore | None = None,
         policy: RedactionPolicy | None = None,
         publisher: StreamPublisher | None = None,
+        audit_log: InMemoryAuditLog | SQLiteAuditLog | None = None,
     ) -> None:
         self.store = store or InMemoryEventStore()
         self.policy = policy or RedactionPolicy()
         self.publisher = publisher or RedisStreamPublisher()
+        self.audit_log = audit_log or InMemoryAuditLog()
+        self.paused_scopes: set[str] = set()
 
     def ingest_dict(self, data: dict[str, Any]) -> IngestResult:
         event = EventEnvelope.from_dict(data)
         return self.ingest(event)
 
     def ingest(self, event: EventEnvelope) -> IngestResult:
+        if self.is_paused(event.source_platform):
+            raise PausedScopeError(event.source_platform)
+
         policy_surface = self.policy.evaluate_surface(event)
         event_dict = event.to_dict()
         if not policy_surface.allowed:
@@ -67,11 +81,69 @@ class EventGateway:
         stream = stream_for_event(event)
         self.store.add(event)
         redis_id = self.publisher.publish(stream, event)
+        self.audit_log.record(
+            AuditRecord(
+                actor="argus-event-gateway",
+                tool="sensor_ingest_raw",
+                scope=stream,
+                event_count=1,
+                redactions_applied=[redaction.kind for redaction in event.redactions],
+                allowed=True,
+                reason="raw event stored locally and published to redis",
+                details={
+                    "redis_id": redis_id,
+                    "raw_event": event.to_dict(),
+                    "raw_data_local_only": True,
+                },
+            )
+        )
         return IngestResult(
             event_id=event.event_id,
             stream=stream,
             redis_id=redis_id,
             sensitivity=event.sensitivity,
+        )
+
+    def pause_scope(self, scope: str = "macos") -> None:
+        self.paused_scopes.add(scope)
+        self.audit_log.record(
+            AuditRecord(
+                actor="argus-dashboard",
+                tool="sensor_pause_scope",
+                scope=scope,
+                event_count=0,
+                redactions_applied=[],
+                allowed=True,
+                reason="operator paused sensor ingest",
+                details={"requested_scope": scope},
+            )
+        )
+
+    def resume_scope(self, scope: str = "macos") -> None:
+        self.paused_scopes.discard(scope)
+        self.audit_log.record(
+            AuditRecord(
+                actor="argus-dashboard",
+                tool="sensor_resume_scope",
+                scope=scope,
+                event_count=0,
+                redactions_applied=[],
+                allowed=True,
+                reason="operator resumed sensor ingest",
+                details={"requested_scope": scope},
+            )
+        )
+
+    def is_paused(self, scope: str) -> bool:
+        return "all" in self.paused_scopes or scope in self.paused_scopes
+
+    def dashboard_state(self) -> dict[str, Any]:
+        return dashboard_state(
+            store=self.store,
+            audit_log=self.audit_log,
+            policy=self.policy,
+            publisher=self.publisher,
+            paused_scopes=self.paused_scopes,
         )
 
 
@@ -83,18 +155,36 @@ def make_handler(gateway: EventGateway) -> type[BaseHTTPRequestHandler]:
             if self.path == "/health":
                 self._write_json(200, {"ok": True})
                 return
+            if self.path == "/dashboard.json":
+                self._write_json(200, gateway.dashboard_state())
+                return
+            if self.path == "/dashboard":
+                self._write_html(200, render_dashboard_html(gateway.dashboard_state()))
+                return
             self._write_json(404, {"ok": False, "error": "not found"})
 
         def do_POST(self) -> None:
-            if self.path != "/events":
-                self._write_json(404, {"ok": False, "error": "not found"})
+            if self.path in {"/control/pause", "/control/resume"}:
+                payload = self._read_payload()
+                scope = str(payload.get("scope") or "macos")
+                if self.path == "/control/pause":
+                    gateway.pause_scope(scope)
+                    status = "paused"
+                else:
+                    gateway.resume_scope(scope)
+                    status = "active"
+                self._write_json(200, {"ok": True, "scope": scope, "status": status})
                 return
 
             try:
-                length = int(self.headers.get("Content-Length", "0"))
-                body = self.rfile.read(length)
-                payload = json.loads(body.decode("utf-8"))
+                if self.path != "/events":
+                    self._write_json(404, {"ok": False, "error": "not found"})
+                    return
+                payload = self._read_payload()
                 result = gateway.ingest_dict(payload)
+            except PausedScopeError as exc:
+                self._write_json(423, {"ok": False, "error": str(exc), "scope": exc.scope})
+                return
             except Exception as exc:  # pragma: no cover - exact HTTP paths are smoke-tested externally.
                 self._write_json(400, {"ok": False, "error": str(exc)})
                 return
@@ -112,13 +202,28 @@ def make_handler(gateway: EventGateway) -> type[BaseHTTPRequestHandler]:
             self.end_headers()
             self.wfile.write(body)
 
+        def _write_html(self, status_code: int, body_text: str) -> None:
+            body = body_text.encode("utf-8")
+            self.send_response(status_code)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def _read_payload(self) -> dict[str, Any]:
+            length = int(self.headers.get("Content-Length", "0"))
+            if length == 0:
+                return {}
+            body = self.rfile.read(length)
+            return json.loads(body.decode("utf-8"))
+
     return ArgusEventGatewayHandler
 
 
 def run(host: str = "127.0.0.1", port: int = 8765) -> None:
     if host not in LOOPBACK_HOSTS:
         raise ValueError(f"Argus event gateway only binds to loopback hosts, got {host!r}")
-    gateway = EventGateway(store=store_from_env())
+    gateway = EventGateway(store=store_from_env(), audit_log=audit_log_from_env())
     server = ThreadingHTTPServer((host, port), make_handler(gateway))
     server.serve_forever()
 
@@ -128,6 +233,13 @@ def store_from_env() -> InMemoryEventStore | SQLiteTimelineStore:
     if not db_path:
         return InMemoryEventStore()
     return SQLiteTimelineStore(db_path)
+
+
+def audit_log_from_env() -> InMemoryAuditLog | SQLiteAuditLog:
+    db_path = os.environ.get("ARGUS_TIMELINE_DB_PATH")
+    if not db_path:
+        return InMemoryAuditLog()
+    return SQLiteAuditLog(db_path)
 
 
 def main(argv: list[str] | None = None) -> int:

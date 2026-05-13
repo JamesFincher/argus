@@ -99,6 +99,7 @@ class LocalMCPServer:
 
     def sensor_get_recent_notes(self, limit: int = 5, actor: str = "hermes") -> dict[str, Any]:
         events = self.store.recent(limit=limit)
+        context = self.store.ambient_summary(policy=self.policy, limit=limit)
         self.audit_log.record(
             AuditRecord(
                 actor=actor,
@@ -108,11 +109,12 @@ class LocalMCPServer:
                 redactions_applied=[],
                 allowed=True,
                 reason="redacted summary retrieval",
+                details={"sanitized_context": context},
             )
         )
         return {
             "ok": True,
-            "context": self.store.ambient_summary(policy=self.policy, limit=limit),
+            "context": context,
         }
 
     def sensor_expand_event(
@@ -133,6 +135,7 @@ class LocalMCPServer:
                     redactions_applied=[],
                     allowed=False,
                     reason="event not found",
+                    details={"event_id": event_id, "raw_mode": raw_mode},
                 )
             )
             return {"ok": False, "error": "event not found", "event_id": event_id}
@@ -153,6 +156,7 @@ class LocalMCPServer:
                         redactions_applied=[],
                         allowed=False,
                         reason=decision.reason,
+                        details={"event_id": event_id, "raw_mode": "full"},
                     )
                 )
                 return {
@@ -170,11 +174,13 @@ class LocalMCPServer:
                     redactions_applied=[],
                     allowed=True,
                     reason=decision.reason,
+                    details={"raw_event": event.to_dict(), "approved_raw_access": True},
                 )
             )
             return {"ok": True, "event": event.to_dict(), "raw_mode": "full"}
 
         redacted = self.policy.redact_event(event)
+        redacted_event = redacted.to_dict()
         self.audit_log.record(
             AuditRecord(
                 actor=actor,
@@ -184,11 +190,12 @@ class LocalMCPServer:
                 redactions_applied=[redaction.kind for redaction in redacted.redactions],
                 allowed=True,
                 reason="redacted event expansion",
+                details={"sanitized_event": redacted_event},
             )
         )
         return {
             "ok": True,
-            "event": redacted.to_dict(),
+            "event": redacted_event,
             "raw_mode": "redacted",
         }
 
@@ -229,6 +236,7 @@ class LocalMCPServer:
                 redactions_applied=[],
                 allowed=True,
                 reason="redacted timeline search",
+                details={"sanitized_matches": matches},
             )
         )
         return {"ok": True, "matches": matches}
@@ -243,6 +251,7 @@ class LocalMCPServer:
                 redactions_applied=[],
                 allowed=True,
                 reason="pause scope requested",
+                details={"requested_scope": scope},
             )
         )
         return {"ok": True, "scope": scope, "status": "pause_requested"}
@@ -257,6 +266,7 @@ class LocalMCPServer:
                 redactions_applied=[],
                 allowed=True,
                 reason="forget scope requested",
+                details={"requested_scope": scope},
             )
         )
         return {"ok": True, "scope": scope, "status": "forget_requested"}
@@ -276,6 +286,7 @@ class LocalMCPServer:
                 redactions_applied=[],
                 allowed=True,
                 reason="redacted session brief export",
+                details={"sanitized_brief": notes},
             )
         )
         return {"ok": True, "brief": notes}
