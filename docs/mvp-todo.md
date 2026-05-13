@@ -46,12 +46,20 @@ Done:
   Chromium-family manifests for packaged `argus-native-host` executables.
 - `argus-mvp-smoke` verifies native messaging, loopback gateway, SQLite
   raw/audit storage, perception notes, and MCP stdio raw-access gating together.
+- ScreenCaptureKit + Vision OCR fallback captures a single screen frame, filters
+  low-confidence text, and emits redacted `activity.screen_frame_ocr` events.
+- Local macOS packaging produces `dist/Argus Sensor.app` and a DMG with the
+  native messaging installer, packaged `argus-native-host` wrapper, service
+  modules, browser extension scaffold, and signing-ready entitlements.
+- Live Hermes/Gengar verification now checks Argus MCP stdio tools, raw-access
+  blocking, and `hermes mcp add/test` against an isolated Hermes home.
 
 Not yet MVP:
 
-- Real ScreenCaptureKit frame capture and Vision OCR observations.
-- Signed/notarized `.app`/DMG with bundled extension/native-host install assets.
-- Live Hermes end-to-end verification.
+- Developer ID signing and notarization on a release certificate.
+- Manual fresh-install macOS permission verification for Screen Recording,
+  Accessibility, and packaged browser native messaging.
+- Redis-backed live-stack variant of the full E2E smoke.
 
 ## P0: Hermes Tool Transport
 
@@ -60,8 +68,7 @@ Owner: parallel worker.
 Goal: Hermes can launch an Argus MCP server process and call tools without
 embedding Python objects in-process.
 
-Status: implemented this pass; remaining work is live Hermes configuration
-documentation and end-to-end verification.
+Status: implemented with live Hermes/Gengar MCP add/test verification.
 
 Tasks:
 
@@ -99,8 +106,8 @@ Owner: local/integration after MCP worker.
 
 Goal: Hermes can discover the plugin through package metadata.
 
-Status: implemented for package metadata and env-backed local store wiring;
-remaining work is live Hermes runtime verification.
+Status: implemented for package metadata and env-backed local store wiring; the
+live verifier now checks package entry points before launching Hermes MCP tests.
 
 Tasks:
 
@@ -192,6 +199,11 @@ Owner: local thread after runtime loop.
 
 Goal: OCR fallback produces redacted `activity.screen_frame_ocr` events from real frames.
 
+Status: implemented with a one-shot ScreenCaptureKit capture path, Vision text
+recognition, confidence filtering, and Swift unit coverage for normalization and
+redaction. Fresh-install permission behavior still needs manual macOS runtime
+verification.
+
 Tasks:
 
 - Replace empty-observation skeleton with a real ScreenCaptureKit frame path.
@@ -213,6 +225,10 @@ Done when:
 ## P1: Packaging And Install
 
 Goal: A user can install and run the MVP repeatedly on macOS.
+
+Status: local unsigned app and DMG packaging implemented. Developer ID signing
+and notarization are ready through environment inputs but still require real
+release credentials.
 
 Tasks:
 
@@ -258,6 +274,10 @@ Done when:
 ## P1: Hermes Live Verification
 
 Goal: Actual Hermes sees Argus tools and uses sanitized context.
+
+Status: implemented with `scripts/verify_hermes_runtime.py`; the verifier writes
+a local MCP config snippet, validates Argus package metadata, runs the Argus
+MCP stdio smoke, and exercises `hermes mcp add/test` in an isolated home.
 
 Tasks:
 

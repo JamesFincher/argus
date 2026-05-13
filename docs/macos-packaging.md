@@ -11,6 +11,34 @@ swift build --target ArgusSensorMac
 swift test
 ```
 
+## Local App And DMG Build
+
+The local packaging script creates `dist/Argus Sensor.app` and, by default,
+`dist/Argus-Sensor-release.dmg` using Apple's `hdiutil`.
+
+```sh
+scripts/dev/package_macos_app.sh release
+```
+
+Unsigned local builds are supported by default so contributors can inspect the
+bundle and DMG without Developer ID credentials. To exercise signing readiness,
+set `ARGUS_CODESIGN_IDENTITY` to a Developer ID Application identity or `-` for
+ad-hoc signing before running the script. Set `ARGUS_CREATE_DMG=0` to build only
+the `.app` bundle.
+
+The bundle stages packaging resources under `Contents/Resources`:
+
+- `NativeMessaging/install_native_messaging_host.py` plus installation notes.
+- `services/argus_services`, used by the packaged native host wrapper.
+- `BrowserExtension/ArgusSafariExtension` when the scaffold exists.
+- `LaunchAgents` plists for the loopback gateway and storage worker.
+- This packaging checklist for release review.
+
+The bundle also stages `Contents/MacOS/argus-native-host`, a wrapper that runs
+`python3 -m argus_services.native_messaging` with `Contents/Resources/services`
+on `PYTHONPATH`. This makes the host path used in the native messaging manifest
+real for local MVP packages.
+
 ## Extension Packaging Gate
 
 Required before a release build:
@@ -38,6 +66,15 @@ Install for Chrome:
 ```sh
 python scripts/install_native_messaging_host.py install \
   --host-path "$(command -v argus-native-host)" \
+  --allowed-origin "chrome-extension://<extension-id>/" \
+  --browser chrome
+```
+
+Install from a packaged app:
+
+```sh
+python3 "/Applications/Argus Sensor.app/Contents/Resources/NativeMessaging/install_native_messaging_host.py" install \
+  --host-path "/Applications/Argus Sensor.app/Contents/MacOS/argus-native-host" \
   --allowed-origin "chrome-extension://<extension-id>/" \
   --browser chrome
 ```

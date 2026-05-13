@@ -82,6 +82,54 @@ public struct ScreenOCRTextObservation: Equatable, Sendable {
     }
 }
 
+public struct ScreenOCRRecognizedTextCandidate: Equatable, Sendable {
+    public var text: String
+    public var confidence: Double
+
+    public init(text: String, confidence: Double) {
+        self.text = text
+        self.confidence = confidence
+    }
+}
+
+public struct ScreenOCRObservationProcessor: Sendable {
+    public var minimumConfidence: Double
+    public var maximumObservationCount: Int
+
+    public init(
+        minimumConfidence: Double = 0.35,
+        maximumObservationCount: Int = 24
+    ) {
+        self.minimumConfidence = minimumConfidence
+        self.maximumObservationCount = maximumObservationCount
+    }
+
+    public func observations(
+        from candidates: [ScreenOCRRecognizedTextCandidate]
+    ) -> [ScreenOCRTextObservation] {
+        candidates
+            .lazy
+            .map { candidate in
+                ScreenOCRTextObservation(
+                    text: Self.normalizedText(candidate.text),
+                    confidence: candidate.confidence
+                )
+            }
+            .filter { observation in
+                !observation.text.isEmpty && observation.confidence >= minimumConfidence
+            }
+            .prefix(maximumObservationCount)
+            .map { $0 }
+    }
+
+    private static func normalizedText(_ text: String) -> String {
+        text
+            .split(whereSeparator: \.isWhitespace)
+            .joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
 public struct ScreenOCREventBuilder: Sendable {
     private let privacyFilter: ArgusPrivacyFilter
 

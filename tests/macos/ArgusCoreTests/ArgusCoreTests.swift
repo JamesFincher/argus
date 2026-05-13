@@ -552,6 +552,48 @@ final class ArgusCoreTests: XCTestCase {
         XCTAssertEqual(event.rawReference, "local-screen-ocr-frame")
     }
 
+    func testScreenOCRObservationProcessorNormalizesAndFiltersVisionCandidates() {
+        let processor = ScreenOCRObservationProcessor(
+            minimumConfidence: 0.5,
+            maximumObservationCount: 2
+        )
+
+        let observations = processor.observations(from: [
+            ScreenOCRRecognizedTextCandidate(text: "   ", confidence: 0.99),
+            ScreenOCRRecognizedTextCandidate(text: " low confidence ", confidence: 0.49),
+            ScreenOCRRecognizedTextCandidate(text: "Reset\n token", confidence: 0.81),
+            ScreenOCRRecognizedTextCandidate(text: "james@example.com", confidence: 0.74),
+            ScreenOCRRecognizedTextCandidate(text: "third visible line", confidence: 0.93)
+        ])
+
+        XCTAssertEqual(observations, [
+            ScreenOCRTextObservation(text: "Reset token", confidence: 0.81),
+            ScreenOCRTextObservation(text: "james@example.com", confidence: 0.74)
+        ])
+    }
+
+    func testScreenOCRObservationProcessorFeedsRedactedScreenFrameEvent() throws {
+        let decision = ScreenOCRPolicyDecision(allowed: true, blockReason: nil)
+        let observations = ScreenOCRObservationProcessor().observations(from: [
+            ScreenOCRRecognizedTextCandidate(
+                text: "Token\nsk_test_1234567890abcdef",
+                confidence: 0.9
+            )
+        ])
+
+        let event = try XCTUnwrap(ScreenOCREventBuilder().event(
+            observations: observations,
+            decision: decision
+        ))
+        let gateway = event.gatewayEnvelope(sourceDeviceID: "macbook-test")
+
+        XCTAssertEqual(event.kind, .screenFrame)
+        XCTAssertEqual(gateway.eventType, "activity.screen_frame_ocr")
+        XCTAssertFalse(event.summary.contains("sk_test_1234567890abcdef"))
+        XCTAssertEqual(event.payload["observation_count"], .int(1))
+        XCTAssertEqual(event.payload["average_confidence"], .double(0.9))
+    }
+
     func testScreenOCREventBuilderDropsDisallowedOrEmptyCapture() {
         let builder = ScreenOCREventBuilder()
 

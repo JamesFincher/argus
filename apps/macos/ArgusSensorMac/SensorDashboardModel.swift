@@ -9,8 +9,10 @@ final class SensorDashboardModel: ObservableObject {
     @Published private(set) var status = "Paused"
 
     private let frontmostWindowSensor = FrontmostWindowSensor()
+    private let screenOCRSensor = MacScreenOCRSensor()
     private let appLifecycleSensor = AppLifecycleSensor()
     private let eventRecorder: ArgusRuntimeEventRecorder
+    private var lastScreenOCRCapturedAt: Date?
     private lazy var runtimeController = ArgusSensorRuntimeController(
         lifecycleObserver: appLifecycleSensor,
         emit: emit,
@@ -70,9 +72,16 @@ final class SensorDashboardModel: ObservableObject {
 
         emit(event)
 
-        if let focusedFieldEvent = frontmostWindowSensor.captureFocusedFieldEvent() {
+        let focusedFieldEvent = frontmostWindowSensor.captureFocusedFieldEvent()
+        if let focusedFieldEvent {
             emit(focusedFieldEvent)
         }
+
+        captureScreenOCRFallback(
+            appName: event.payload.stringValue(for: "app_name"),
+            windowTitle: event.payload.stringValue(for: "window_title"),
+            structuralSignalsAvailable: focusedFieldEvent != nil
+        )
 
         Task {
             events = await eventRecorder.recent(limit: 12)
@@ -88,5 +97,45 @@ final class SensorDashboardModel: ObservableObject {
             }
             events = await eventRecorder.recent(limit: 12)
         }
+    }
+
+    private func captureScreenOCRFallback(
+        appName: String?,
+        windowTitle: String?,
+        structuralSignalsAvailable: Bool
+    ) {
+        let policy = ScreenOCRPolicy(
+            userConsented: !isPaused,
+            screenRecordingGranted: permissionSnapshot.screenRecordingGranted,
+            structuralSignalsAvailable: structuralSignalsAvailable
+        )
+
+        Task {
+            do {
+                let capturedAt = Date()
+                guard let event = try await screenOCRSensor.captureOCREvent(
+                    policy: policy,
+                    lastCapturedAt: lastScreenOCRCapturedAt,
+                    appName: appName,
+                    windowTitle: windowTitle
+                ) else {
+                    return
+                }
+                lastScreenOCRCapturedAt = capturedAt
+                emit(event)
+                status = "Captured \(event.kind.rawValue)"
+            } catch {
+                status = "Screen OCR unavailable: \(error)"
+            }
+        }
+    }
+}
+
+private extension Dictionary where Key == String, Value == ArgusJSONValue {
+    func stringValue(for key: String) -> String? {
+        guard case .string(let value) = self[key] else {
+            return nil
+        }
+        return value
     }
 }
