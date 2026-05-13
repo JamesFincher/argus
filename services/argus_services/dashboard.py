@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import html
+from datetime import datetime, timezone
 from typing import Any
 
 from .audit import InMemoryAuditLog
@@ -24,12 +25,14 @@ def dashboard_state(
     publisher: Any | None = None,
     paused_scopes: set[str] | None = None,
     limit: int = 20,
+    now: datetime | None = None,
 ) -> dict[str, Any]:
     raw_events = [event.to_dict() for event in store.recent(limit=limit)]
     sanitized_events = [
         policy.redact_event(event).to_dict()
         for event in store.recent(limit=limit)
     ]
+    health_events = store.recent(limit=max(limit, 100))
     audit_records = [record.to_dict() for record in audit_log.recent(limit=limit)]
 
     return {
@@ -43,6 +46,11 @@ def dashboard_state(
                 "export": "/control/export",
             },
         },
+        "sensor_health": sensor_health_state(
+            health_events,
+            paused_scopes=paused_scopes or set(),
+            now=now,
+        ),
         "redis": redis_status(publisher),
         "raw_events": raw_events,
         "sanitized_events": sanitized_events,
@@ -70,6 +78,60 @@ def redis_status(publisher: Any | None) -> dict[str, Any]:
             status["ping"] = "error"
             status["error"] = str(exc)
     return status
+
+
+def sensor_health_state(
+    events: list[Any],
+    *,
+    paused_scopes: set[str],
+    now: datetime | None = None,
+    stale_after_seconds: int = 120,
+) -> dict[str, Any]:
+    reference_time = now or datetime.now(timezone.utc)
+    heartbeats: dict[str, dict[str, Any]] = {}
+    permissions: dict[str, dict[str, Any]] = {}
+    for event in events:
+        if event.event_type == "system.sensor_heartbeat":
+            sensor_id = str(event.payload.get("sensor_id") or event.sensor_id)
+            observed_at = parse_event_time(event.observed_at)
+            seconds_since_seen = int((reference_time - observed_at).total_seconds())
+            status = str(event.payload.get("status") or "ok")
+            if event.source_platform in paused_scopes or "all" in paused_scopes:
+                status = "paused"
+            elif seconds_since_seen > stale_after_seconds:
+                status = "stale"
+            current = heartbeats.get(sensor_id)
+            if current is None or observed_at > parse_event_time(current["last_seen"]):
+                heartbeats[sensor_id] = {
+                    "sensor_id": sensor_id,
+                    "source_platform": event.source_platform,
+                    "status": status,
+                    "last_seen": event.observed_at,
+                    "seconds_since_seen": max(seconds_since_seen, 0),
+                    "expected_interval_seconds": event.payload.get("interval_seconds"),
+                }
+        elif event.event_type == "system.permission_state":
+            current_permission = permissions.get(event.source_platform)
+            observed_at = parse_event_time(event.observed_at)
+            if current_permission is not None and observed_at <= parse_event_time(
+                current_permission["observed_at"]
+            ):
+                continue
+            permissions[event.source_platform] = {
+                "source_platform": event.source_platform,
+                "observed_at": event.observed_at,
+                "payload": dict(event.payload),
+            }
+
+    return {
+        "stale_after_seconds": stale_after_seconds,
+        "heartbeats": sorted(heartbeats.values(), key=lambda item: item["sensor_id"]),
+        "permissions": permissions,
+    }
+
+
+def parse_event_time(value: str) -> datetime:
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
 def hermes_outputs_from_audit(audit_records: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -100,6 +162,18 @@ def hermes_outputs_from_audit(audit_records: list[dict[str, Any]]) -> list[dict[
 
 
 def render_dashboard_html(state: dict[str, Any]) -> str:
+    sensor_items = "\n".join(
+        "<li>"
+        f"<code>{html.escape(item['sensor_id'])}</code> "
+        f"{html.escape(item['status'])} "
+        f"last seen {html.escape(str(item['seconds_since_seen']))}s ago"
+        "</li>"
+        for item in state["sensor_health"]["heartbeats"][:10]
+    ) or "<li>No sensor heartbeats recorded.</li>"
+    permission_items = "\n".join(
+        f"<li><code>{html.escape(platform)}</code> {html.escape(str(details['payload']))}</li>"
+        for platform, details in sorted(state["sensor_health"]["permissions"].items())
+    ) or "<li>No permission state recorded.</li>"
     raw_items = "\n".join(
         f"<li><code>{html.escape(event['event_type'])}</code> {html.escape(str(event['payload']))}</li>"
         for event in state["raw_events"][:10]
@@ -153,6 +227,12 @@ def render_dashboard_html(state: dict[str, Any]) -> str:
       <input name="limit" value="20" aria-label="Export limit">
       <button type="submit">Export Session Brief</button>
     </form>
+  </section>
+  <section>
+    <h2>Sensor Health</h2>
+    <ul>{sensor_items}</ul>
+    <h2>Permission State</h2>
+    <ul>{permission_items}</ul>
   </section>
   <section><h2>Raw Local Events</h2><ul>{raw_items}</ul></section>
   <section><h2>Sanitized Hermes Outputs</h2><ul>{hermes_items}</ul></section>

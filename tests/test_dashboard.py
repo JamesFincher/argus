@@ -2,6 +2,7 @@ import json
 import threading
 import urllib.error
 import urllib.request
+from datetime import datetime, timezone
 from http.server import ThreadingHTTPServer
 
 from argus_services.audit import InMemoryAuditLog
@@ -73,6 +74,54 @@ def test_event_gateway_records_raw_ingest_audit_without_hermes_output():
     assert state["audit_records"][0]["details"]["raw_data_local_only"] is True
     assert state["audit_records"][0]["details"]["raw_event"]["event_id"] == event.event_id
     assert state["hermes_outputs"] == []
+
+
+def test_dashboard_reports_sensor_health_and_permission_state():
+    store = InMemoryEventStore()
+    now = datetime(2026, 5, 13, 15, 0, tzinfo=timezone.utc)
+    fresh = store.add(
+        make_event(
+            "system.sensor_heartbeat",
+            {"sensor_id": "argus-sensor-mac", "status": "ok", "interval_seconds": 30},
+            sensor_id="argus-sensor-mac",
+            observed_at="2026-05-13T14:59:30Z",
+        )
+    )
+    stale = store.add(
+        make_event(
+            "system.sensor_heartbeat",
+            {"sensor_id": "argus-safari-extension", "status": "ok", "interval_seconds": 30},
+            sensor_id="argus-safari-extension",
+            observed_at="2026-05-13T14:55:00Z",
+        )
+    )
+    store.add(
+        make_event(
+            "system.permission_state",
+            {"accessibility_trusted": True, "screen_recording_granted": False},
+            observed_at="2026-05-13T14:59:00Z",
+        )
+    )
+
+    state = dashboard_state(
+        store=store,
+        audit_log=InMemoryAuditLog(),
+        policy=RedactionPolicy(),
+        paused_scopes=set(),
+        now=now,
+    )
+
+    health = {
+        item["sensor_id"]: item
+        for item in state["sensor_health"]["heartbeats"]
+    }
+    assert health[fresh.sensor_id]["status"] == "ok"
+    assert health[fresh.sensor_id]["seconds_since_seen"] == 30
+    assert health[stale.sensor_id]["status"] == "stale"
+    assert state["sensor_health"]["permissions"]["macos"]["payload"] == {
+        "accessibility_trusted": True,
+        "screen_recording_granted": False,
+    }
 
 
 def test_event_gateway_pause_blocks_ingest_until_resumed():
@@ -178,6 +227,7 @@ def test_dashboard_http_forget_and_export_controls_apply_policy():
 def test_dashboard_html_contains_management_sections():
     state = {
         "sensor_control": {"paused_scopes": ["macos"], "actions": {}},
+        "sensor_health": {"heartbeats": [], "permissions": {}},
         "redis": {"ping": "PONG"},
         "raw_events": [],
         "hermes_outputs": [],
@@ -189,5 +239,7 @@ def test_dashboard_html_contains_management_sections():
     assert "Pause Sensor Ingest" in html
     assert "Forget Scope" in html
     assert "Export Session Brief" in html
+    assert "Sensor Health" in html
+    assert "Permission State" in html
     assert "Sanitized Hermes Outputs" in html
     assert "Raw Local Events" in html
