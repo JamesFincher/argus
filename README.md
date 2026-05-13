@@ -135,6 +135,51 @@ MCP tools return sanitized content by default. Full raw event expansion remains
 policy-gated and every agent-facing call records an audit entry in the local
 audit store.
 
+Run the local MVP smoke path without external services:
+
+```sh
+uv run argus-mvp-smoke --db-path /tmp/argus-mvp-smoke.db
+```
+
+That command sends a framed browser page-context message through the native
+host, ingests it through the loopback event gateway, persists raw/audit rows in
+SQLite, derives a sanitized perception note, and verifies MCP stdio blocks full
+raw expansion without approval.
+
+## Hermes Plugin
+
+Argus also packages a Hermes plugin entry point for hook-based discovery:
+`hermes.plugins:argus = argus_services.hermes_plugin:register`.
+
+Install the package into the Python environment Hermes scans for plugins:
+
+```sh
+uv pip install -e /Users/james/code/argus/argus
+```
+
+Hermes plugin discovery can load the entry point and call `register(ctx)`,
+where `ctx` provides `register_hook(name, handler)`. The plugin registers:
+
+- `pre_llm_call`: injects `sensor_get_recent_notes` sanitized ambient context.
+- `pre_tool_call`: blocks sensitive non-sensor tool arguments and gates full raw
+  `sensor_expand_event` access.
+
+Use the same persistence environment as the MCP stdio transport so both
+integrations read and audit against the same local stores:
+
+```sh
+export ARGUS_TIMELINE_DB_PATH="$HOME/Library/Application Support/Argus/timeline.db"
+export ARGUS_LANCEDB_PATH="$HOME/Library/Application Support/Argus/notes.lancedb"
+export ARGUS_APPROVAL_TOKEN="local-operator-token"
+```
+
+`ARGUS_TIMELINE_DB_PATH` enables the SQLite + FTS5 timeline and audit log used
+by both `argus-sensor-mcp` and the Hermes plugin. If it is omitted, the plugin
+falls back to in-memory stores for isolated test sessions. `ARGUS_LANCEDB_PATH`
+enables the optional derived-note index when `lancedb` is installed.
+`ARGUS_APPROVAL_TOKEN` is optional and only authorizes explicit full raw event
+expansion requests that present the same token.
+
 ## Browser Native Host
 
 `argus-native-host` implements the browser native messaging protocol for Safari
@@ -147,6 +192,27 @@ loopback `/events` URL:
 ```sh
 ARGUS_EVENT_GATEWAY_URL="http://127.0.0.1:8765/events" uv run argus-native-host
 ```
+
+Install the per-user Chromium-family native messaging manifest by pointing the
+installer at the packaged `argus-native-host` executable and the extension origin
+that should be allowed to call it:
+
+```sh
+python scripts/install_native_messaging_host.py install \
+  --host-path "$(command -v argus-native-host)" \
+  --allowed-origin "chrome-extension://<extension-id>/" \
+  --browser chrome
+```
+
+Remove the manifest for the current user:
+
+```sh
+python scripts/install_native_messaging_host.py uninstall --browser chrome
+```
+
+The installer also accepts a JSON config with `host_path`, `allowed_origins`,
+and `browsers`, or `ARGUS_NATIVE_HOST_PATH` and
+`ARGUS_NATIVE_ALLOWED_ORIGINS` for local automation.
 
 ## macOS App
 

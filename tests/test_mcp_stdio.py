@@ -202,6 +202,7 @@ def test_pyproject_registers_stdio_entry_point():
     assert pyproject["project"]["scripts"]["argus-sensor-mcp"] == "argus_services.mcp_stdio:main"
     assert pyproject["project"]["scripts"]["hermes-sensor-mcp"] == "argus_services.mcp_stdio:main"
     assert pyproject["project"]["scripts"]["argus-native-host"] == "argus_services.native_messaging:main"
+    assert pyproject["project"]["scripts"]["argus-mvp-smoke"] == "argus_services.mvp_smoke:main"
 
 
 def test_stdio_server_uses_env_configured_sqlite_store(tmp_path, monkeypatch):

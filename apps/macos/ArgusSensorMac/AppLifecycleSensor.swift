@@ -58,3 +58,5 @@ final class AppLifecycleSensor {
         }
     }
 }
+
+extension AppLifecycleSensor: ArgusRuntimeLifecycleObserving {}

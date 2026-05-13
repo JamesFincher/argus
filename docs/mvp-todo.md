@@ -32,7 +32,8 @@ Done:
 - MCP-style in-process tool surface exposes required sensor tools.
 - MCP stdio transport exposes the same tool surface through console scripts:
   `argus-mcp-stdio`, `argus-sensor-mcp`, and `hermes-sensor-mcp`.
-- Hermes plugin hook skeleton enforces pre-LLM and pre-tool policies in tests.
+- Hermes plugin entry point is packaged under `hermes.plugins`, uses env-backed
+  local stores by default, and enforces pre-LLM/pre-tool policies in tests.
 - Swift Argus Core has canonical gateway envelope, UUIDv7 IDs, privacy filtering,
   local buffer/spool, loopback gateway sink, permission models, and OCR policy.
 - macOS app can manually capture frontmost window/focused-field events when
@@ -41,12 +42,13 @@ Done:
   periodic structural snapshots, pause shutdown, and sink error events.
 - Native messaging host converts Safari/WebExtension `page_context` messages into
   canonical browser-page events and posts them to the loopback gateway.
+- Native messaging manifest install/uninstall tooling writes per-user
+  Chromium-family manifests for packaged `argus-native-host` executables.
+- `argus-mvp-smoke` verifies native messaging, loopback gateway, SQLite
+  raw/audit storage, perception notes, and MCP stdio raw-access gating together.
 
 Not yet MVP:
 
-- Packaged Hermes plugin discovery through entry points.
-- Native messaging host manifest and macOS install/uninstall scripts.
-- Runtime-level tests around injected timers/sensors beyond factory coverage.
 - Real ScreenCaptureKit frame capture and Vision OCR observations.
 - Signed/notarized `.app`/DMG with bundled extension/native-host install assets.
 - Live Hermes end-to-end verification.
@@ -97,7 +99,8 @@ Owner: local/integration after MCP worker.
 
 Goal: Hermes can discover the plugin through package metadata.
 
-Status: functional host implemented; manifest/install packaging remains.
+Status: implemented for package metadata and env-backed local store wiring;
+remaining work is live Hermes runtime verification.
 
 Tasks:
 
@@ -119,6 +122,10 @@ Owner: parallel worker.
 
 Goal: Safari/WebExtension page context becomes real `activity.browser_page`
 events in Argus Core.
+
+Status: host, manifest installer, and tests are implemented for the local
+Chromium-family native messaging path. Safari App Extension packaging remains
+part of the broader macOS packaging work.
 
 Tasks:
 
@@ -151,8 +158,8 @@ Owner: local thread unless another worker slot opens.
 
 Goal: The macOS app runs like a visible sensor, not only a manual snapshot tool.
 
-Status: basic visible runtime implemented; deeper injected runtime tests and app
-verification remain.
+Status: visible runtime and injected runtime tests are implemented. Live app
+verification remains.
 
 Tasks:
 
@@ -229,6 +236,9 @@ Done when:
 ## P1: Full Local E2E
 
 Goal: Prove the whole MVP path works locally.
+
+Status: `argus-mvp-smoke` now verifies the core local path without external
+services. A Redis-backed live-stack variant remains.
 
 Tasks:
 

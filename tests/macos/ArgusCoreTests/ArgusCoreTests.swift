@@ -298,6 +298,69 @@ final class ArgusCoreTests: XCTestCase {
         XCTAssertEqual(gateway.rawScope, "none")
     }
 
+    @MainActor
+    func testRuntimeControllerEmitsHeartbeatsAndInvalidatesTimersAcrossPauseResume() {
+        let scheduler = ManualTimerScheduler()
+        let lifecycle = ManualLifecycleObserver()
+        var emitted: [ArgusEventEnvelope] = []
+        var captureCount = 0
+        let controller = ArgusSensorRuntimeController(
+            heartbeatIntervalSeconds: 7,
+            captureIntervalSeconds: 3,
+            timerScheduler: scheduler,
+            lifecycleObserver: lifecycle,
+            emit: { event in
+                emitted.append(event)
+            },
+            captureSnapshot: {
+                captureCount += 1
+            }
+        )
+
+        controller.resume()
+
+        XCTAssertEqual(lifecycle.startCount, 1)
+        XCTAssertEqual(captureCount, 1)
+        XCTAssertEqual(scheduler.timers.map(\.intervalSeconds), [7, 3])
+        XCTAssertEqual(emitted.map(\.kind), [.sensorHeartbeat])
+        XCTAssertEqual(emitted.first?.payload["mode"], .string("active"))
+
+        scheduler.fireTimer(at: 0)
+        scheduler.fireTimer(at: 1)
+
+        XCTAssertEqual(captureCount, 2)
+        XCTAssertEqual(emitted.map(\.kind), [.sensorHeartbeat, .sensorHeartbeat])
+        XCTAssertEqual(emitted.last?.payload["interval_seconds"], .int(7))
+
+        controller.pause()
+
+        XCTAssertEqual(lifecycle.stopCount, 1)
+        XCTAssertTrue(scheduler.timers.allSatisfy(\.isInvalidated))
+        XCTAssertEqual(emitted.last?.payload["mode"], .string("paused"))
+        XCTAssertEqual(emitted.last?.payload["status"], .string("paused"))
+    }
+
+    func testRuntimeEventRecorderBuffersSystemErrorWhenSinkFails() async {
+        let sink = FailingEventSink()
+        let recorder = ArgusRuntimeEventRecorder(sink: sink)
+        let event = ArgusEventEnvelope(
+            platform: .macOS,
+            source: "unit-test",
+            kind: .frontmostWindow,
+            summary: "first"
+        )
+
+        let result = await recorder.append(event)
+        let recent = await recorder.recent(limit: 4)
+        let sinkAttempts = await sink.events()
+
+        XCTAssertEqual(result.sinkErrorMessage, "sink unavailable")
+        XCTAssertEqual(recent.map(\.kind), [.systemError, .frontmostWindow])
+        XCTAssertEqual(recent.first?.payload["stage"], .string("event_sink"))
+        XCTAssertEqual(recent.first?.payload["message"], .string("sink unavailable"))
+        XCTAssertEqual(sinkAttempts.map(\.kind), [.frontmostWindow, .systemError])
+    }
+
     func testSystemErrorFactoryEmitsSystemErrorEvent() {
         let event = ArgusEventFactory.systemError(message: "gateway down", stage: "event_sink")
         let gateway = event.gatewayEnvelope(sourceDeviceID: "macbook-test")
@@ -500,5 +563,90 @@ final class ArgusCoreTests: XCTestCase {
             observations: [ScreenOCRTextObservation(text: "   ", confidence: 0.7)],
             decision: ScreenOCRPolicyDecision(allowed: true, blockReason: nil)
         ))
+    }
+}
+
+@MainActor
+private final class ManualTimerScheduler: ArgusRuntimeTimerScheduling {
+    private(set) var timers: [ManualTimerToken] = []
+
+    func scheduleTimer(
+        intervalSeconds: Int,
+        repeats: Bool,
+        _ fire: @escaping @MainActor () -> Void
+    ) -> any ArgusRuntimeTimerToken {
+        let timer = ManualTimerToken(
+            intervalSeconds: intervalSeconds,
+            repeats: repeats,
+            fireHandler: fire
+        )
+        timers.append(timer)
+        return timer
+    }
+
+    func fireTimer(at index: Int) {
+        timers[index].fire()
+    }
+}
+
+private final class ManualTimerToken: ArgusRuntimeTimerToken, @unchecked Sendable {
+    let intervalSeconds: Int
+    let repeats: Bool
+    private let fireHandler: @MainActor () -> Void
+    private(set) var isInvalidated = false
+
+    init(
+        intervalSeconds: Int,
+        repeats: Bool,
+        fireHandler: @escaping @MainActor () -> Void
+    ) {
+        self.intervalSeconds = intervalSeconds
+        self.repeats = repeats
+        self.fireHandler = fireHandler
+    }
+
+    @MainActor
+    func fire() {
+        guard !isInvalidated else { return }
+        fireHandler()
+    }
+
+    func invalidate() {
+        isInvalidated = true
+    }
+}
+
+@MainActor
+private final class ManualLifecycleObserver: ArgusRuntimeLifecycleObserving {
+    private(set) var startCount = 0
+    private(set) var stopCount = 0
+
+    func start(emit: @escaping @MainActor (ArgusEventEnvelope) -> Void) {
+        startCount += 1
+    }
+
+    func stop() {
+        stopCount += 1
+    }
+}
+
+private enum FailingEventSinkError: Error, CustomStringConvertible {
+    case unavailable
+
+    var description: String {
+        "sink unavailable"
+    }
+}
+
+private actor FailingEventSink: ArgusEventSink {
+    private var appended: [ArgusEventEnvelope] = []
+
+    func append(_ event: ArgusEventEnvelope) async throws {
+        appended.append(event)
+        throw FailingEventSinkError.unavailable
+    }
+
+    func events() -> [ArgusEventEnvelope] {
+        appended
     }
 }

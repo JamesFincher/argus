@@ -14,6 +14,10 @@ argus-mcp-stdio = "argus_services.mcp_stdio:main"
 argus-sensor-mcp = "argus_services.mcp_stdio:main"
 hermes-sensor-mcp = "argus_services.mcp_stdio:main"
 argus-native-host = "argus_services.native_messaging:main"
+argus-mvp-smoke = "argus_services.mvp_smoke:main"
+
+[project.entry-points."hermes.plugins"]
+argus = "argus_services.hermes_plugin:register"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
