@@ -200,10 +200,15 @@ class LocalMCPServer:
     ) -> dict[str, Any]:
         query_lower = query.lower()
         matches = []
-        for event in self.store.recent(limit=max(limit * 3, limit)):
+        if hasattr(self.store, "search"):
+            candidate_events = self.store.search(query, limit=limit)
+        else:
+            candidate_events = self.store.recent(limit=max(limit * 3, limit))
+
+        for event in candidate_events:
             redacted = self.policy.redact_event(event)
             text = self.store.summary_for(redacted)
-            if query_lower in text.lower():
+            if hasattr(self.store, "search") or query_lower in text.lower():
                 matches.append(
                     {
                         "event_id": event.event_id,

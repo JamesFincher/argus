@@ -1,6 +1,7 @@
 from argus_services.events import make_event
 from argus_services.mcp import LocalMCPServer
 from argus_services.policy import RedactionPolicy
+from argus_services.sqlite_store import SQLiteTimelineStore
 from argus_services.store import InMemoryEventStore
 
 
@@ -116,3 +117,33 @@ def test_timeline_search_returns_redacted_matches():
     assert "alex@example.com" not in result["matches"][0]["summary"]
     assert "[REDACTED_EMAIL]" in result["matches"][0]["summary"]
     assert server.audit_log.records[-1].tool == "sensor_timeline_search"
+
+
+def test_timeline_search_uses_sqlite_fts_when_available(tmp_path):
+    store = SQLiteTimelineStore(tmp_path / "timeline.db")
+    try:
+        pricing = store.add(
+            make_event(
+                "perception.note",
+                {"summary": "Pricing discussion with alex@example.com"},
+                tags=["procurement"],
+            )
+        )
+        store.add(
+            make_event(
+                "perception.note",
+                {"summary": "Deployment discussion"},
+                tags=["infra"],
+            )
+        )
+        server = LocalMCPServer(store=store, policy=RedactionPolicy())
+
+        result = server.call_tool("sensor_timeline_search", query="procurement", actor="hermes")
+
+        assert result["ok"] is True
+        assert [match["event_id"] for match in result["matches"]] == [pricing.event_id]
+        assert "alex@example.com" not in result["matches"][0]["summary"]
+        assert "[REDACTED_EMAIL]" in result["matches"][0]["summary"]
+        assert server.audit_log.records[-1].event_count == 1
+    finally:
+        store.close()
