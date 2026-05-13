@@ -150,6 +150,27 @@ def test_timeline_search_uses_sqlite_fts_when_available(tmp_path):
         store.close()
 
 
+def test_timeline_search_uses_embedding_note_index_and_redacts_summary():
+    server = LocalMCPServer(policy=RedactionPolicy())
+    note = server.add_event(
+        make_event(
+            "perception.note",
+            {
+                "summary": "Vendor pricing review with alex@example.com",
+                "evidence_event_ids": ["source-1"],
+            },
+        )
+    )
+
+    result = server.call_tool("sensor_timeline_search", query="vendor pricing", actor="hermes")
+
+    assert result["ok"] is True
+    assert result["matches"][0]["event_id"] == note.event_id
+    assert "alex@example.com" not in result["matches"][0]["summary"]
+    assert "[REDACTED_EMAIL]" in result["matches"][0]["summary"]
+    assert result["matches"][0]["source_event_ids"] == ["source-1"]
+
+
 def test_forget_scope_purges_events_and_tombstones_raw_audit():
     store = InMemoryEventStore()
     event = store.add(
@@ -182,3 +203,21 @@ def test_forget_scope_purges_events_and_tombstones_raw_audit():
     assert server.audit_log.records[0].details["raw_event"]["tombstoned"] is True
     assert server.audit_log.records[-1].tool == "sensor_forget_scope"
     assert server.audit_log.records[-1].event_count == 1
+
+
+def test_forget_scope_removes_embedding_notes():
+    server = LocalMCPServer(policy=RedactionPolicy())
+    note = server.add_event(
+        make_event(
+            "perception.note",
+            {"summary": "Vendor.example pricing", "evidence_event_ids": ["source-1"]},
+        )
+    )
+
+    result = server.call_tool("sensor_forget_scope", scope="vendor.example", actor="hermes")
+    search = server.call_tool("sensor_timeline_search", query="vendor", actor="hermes")
+
+    assert result["events_removed"] == 1
+    assert result["embedding_notes_removed"] == 1
+    assert server.store.get(note.event_id) is None
+    assert search["matches"] == []

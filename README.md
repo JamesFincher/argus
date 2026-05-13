@@ -94,6 +94,11 @@ port. Redis Streams carry the full event contract so workers can replay, ack,
 reclaim, dead-letter, and persist events into SQLite without raw data leaving
 the local machine.
 
+Semantic retrieval stores derived perception notes only. The default index uses
+deterministic local embeddings for tests and offline operation; the
+`LanceDBNoteIndex` backend persists the same raw-free note records to a local
+LanceDB path when the optional `lancedb` package is installed.
+
 ## macOS App
 
 Build the macOS Argus Sensor package target:

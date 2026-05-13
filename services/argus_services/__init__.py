@@ -9,7 +9,7 @@ from .metrics import METRIC_NAMES, MetricsRegistry
 from .perception import PerceptionOutput, PerceptionWorker, TemplateSummarizer
 from .policy import PolicyDecision, RedactionPolicy, RedactionResult
 from .purge import ScopePurgeResult
-from .retrieval import InMemoryNoteIndex, RetrievalNote
+from .retrieval import HashEmbeddingModel, InMemoryNoteIndex, LanceDBNoteIndex, RetrievalNote
 from .sqlite_store import SQLiteAuditLog, SQLiteTimelineStore
 from .store import InMemoryEventStore
 from .storage_worker import RedisToSQLiteWorker
@@ -19,9 +19,11 @@ __all__ = [
     "AuditRecord",
     "EventEnvelope",
     "EventGateway",
+    "HashEmbeddingModel",
     "InMemoryEventStore",
     "InMemoryAuditLog",
     "InMemoryNoteIndex",
+    "LanceDBNoteIndex",
     "LocalMCPServer",
     "METRIC_NAMES",
     "MetricsRegistry",

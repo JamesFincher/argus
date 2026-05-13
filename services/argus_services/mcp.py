@@ -9,6 +9,7 @@ from .audit import AuditRecord, InMemoryAuditLog
 from .events import EventEnvelope
 from .policy import RedactionPolicy
 from .purge import ScopePurgeResult
+from .retrieval import InMemoryNoteIndex, RetrievalNote
 from .store import InMemoryEventStore
 
 ToolCallable = Callable[..., dict[str, Any]]
@@ -50,15 +51,20 @@ class LocalMCPServer:
         store: InMemoryEventStore | None = None,
         policy: RedactionPolicy | None = None,
         audit_log: InMemoryAuditLog | None = None,
+        note_index: Any | None = None,
     ) -> None:
         self.store = store or InMemoryEventStore()
         self.policy = policy or RedactionPolicy()
         self.audit_log = audit_log or InMemoryAuditLog()
+        self.note_index = note_index or InMemoryNoteIndex()
         self.registry = ToolRegistry()
         self._register_default_tools()
 
     def add_event(self, event: EventEnvelope) -> EventEnvelope:
-        return self.store.add(event)
+        stored = self.store.add(event)
+        if hasattr(self.note_index, "add_event"):
+            self.note_index.add_event(stored)
+        return stored
 
     def list_tools(self) -> list[dict[str, str]]:
         return self.registry.list_tools()
@@ -208,12 +214,23 @@ class LocalMCPServer:
     ) -> dict[str, Any]:
         query_lower = query.lower()
         matches = []
+        seen_event_ids: set[str] = set()
+        if hasattr(self.note_index, "search"):
+            for note in self.note_index.search(query, top_k=limit):
+                match = self._match_from_note(note)
+                matches.append(match)
+                seen_event_ids.add(match["event_id"])
+                if len(matches) >= limit:
+                    break
+
         if hasattr(self.store, "search"):
             candidate_events = self.store.search(query, limit=limit)
         else:
             candidate_events = self.store.recent(limit=max(limit * 3, limit))
 
         for event in candidate_events:
+            if event.event_id in seen_event_ids:
+                continue
             redacted = self.policy.redact_event(event)
             text = self.store.summary_for(redacted)
             if hasattr(self.store, "search") or query_lower in text.lower():
@@ -242,6 +259,16 @@ class LocalMCPServer:
         )
         return {"ok": True, "matches": matches}
 
+    def _match_from_note(self, note: RetrievalNote) -> dict[str, Any]:
+        redacted_summary = self.policy.redact_value(note.summary).value
+        return {
+            "event_id": note.note_id,
+            "event_type": "perception.note",
+            "summary": redacted_summary,
+            "sensitivity": note.sensitivity,
+            "source_event_ids": list(note.source_event_ids),
+        }
+
     def sensor_pause_scope(self, scope: str, actor: str = "hermes") -> dict[str, Any]:
         self.audit_log.record(
             AuditRecord(
@@ -268,10 +295,16 @@ class LocalMCPServer:
             if hasattr(self.audit_log, "tombstone_scope")
             else 0
         )
+        embedding_notes_removed = (
+            self.note_index.forget_scope(scope)
+            if hasattr(self.note_index, "forget_scope")
+            else 0
+        )
         result = ScopePurgeResult(
             scope=scope,
             events_removed=events_removed,
             audit_records_tombstoned=audit_records_tombstoned,
+            embedding_notes_removed=embedding_notes_removed,
         )
         self.audit_log.record(
             AuditRecord(
@@ -288,7 +321,11 @@ class LocalMCPServer:
                     "stores": {
                         "timeline": "purged",
                         "audit_raw_payloads": "tombstoned",
-                        "lancedb": "not_configured",
+                        "lancedb": (
+                            "purged"
+                            if hasattr(self.note_index, "forget_scope")
+                            else "not_configured"
+                        ),
                         "neo4j": "not_configured",
                         "retained_blobs": "not_configured",
                     },
