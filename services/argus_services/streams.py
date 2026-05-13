@@ -48,9 +48,14 @@ def xadd_fields(event: EventEnvelope) -> dict[str, str]:
     return {
         "event_id": data["event_id"],
         "event_type": data["event_type"],
+        "schema_version": data["schema_version"],
+        "source_device_id": data["source_device_id"],
         "source_platform": data["source_platform"],
         "sensor_id": data["sensor_id"],
+        "sensor_version": data["sensor_version"],
         "observed_at": data["observed_at"],
+        "ingested_at": data["ingested_at"],
+        "session_id": data["session_id"] or "",
         "dedupe_key": data["dedupe_key"] or "",
         "sensitivity": data["sensitivity"],
         "raw_scope": data["raw_scope"],
@@ -59,6 +64,30 @@ def xadd_fields(event: EventEnvelope) -> dict[str, str]:
         "relationships_json": json.dumps(data["relationships"], sort_keys=True, separators=(",", ":")),
         "tags_json": json.dumps(data["tags"], sort_keys=True, separators=(",", ":")),
     }
+
+
+def event_from_stream_fields(fields: dict[str, str]) -> EventEnvelope:
+    return EventEnvelope.from_dict(
+        {
+            "event_id": fields["event_id"],
+            "event_type": fields["event_type"],
+            "schema_version": fields.get("schema_version", "2026-05-11"),
+            "source_device_id": fields.get("source_device_id", "unknown"),
+            "source_platform": fields["source_platform"],
+            "sensor_id": fields["sensor_id"],
+            "sensor_version": fields.get("sensor_version", "0.1.0"),
+            "observed_at": fields["observed_at"],
+            "ingested_at": fields.get("ingested_at") or fields["observed_at"],
+            "session_id": fields.get("session_id") or None,
+            "dedupe_key": fields.get("dedupe_key") or None,
+            "sensitivity": fields["sensitivity"],
+            "raw_scope": fields["raw_scope"],
+            "payload": json.loads(fields["payload_json"]),
+            "redactions": json.loads(fields["redactions_json"]),
+            "relationships": json.loads(fields["relationships_json"]),
+            "tags": json.loads(fields["tags_json"]),
+        }
+    )
 
 
 class StreamPublisher(Protocol):

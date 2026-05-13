@@ -2,17 +2,17 @@
   "streams": [
     {
       "name": "stream:raw:macos",
-      "consumer_groups": ["cg-perception"],
+      "consumer_groups": ["cg-perception", "cg-storage"],
       "retention": "24h"
     },
     {
       "name": "stream:raw:ios",
-      "consumer_groups": ["cg-perception"],
+      "consumer_groups": ["cg-perception", "cg-storage"],
       "retention": "24h"
     },
     {
       "name": "stream:raw:watchos",
-      "consumer_groups": ["cg-perception"],
+      "consumer_groups": ["cg-perception", "cg-storage"],
       "retention": "24h"
     },
     {

@@ -39,8 +39,13 @@ def test_xadd_fields_preserve_contract_values():
 
     assert fields["event_id"] == event.event_id
     assert fields["event_type"] == "activity.frontmost_window"
+    assert fields["schema_version"] == "2026-05-11"
+    assert fields["source_device_id"] == event.source_device_id
     assert fields["source_platform"] == "macos"
     assert fields["sensor_id"] == "argus-sensor-mac"
+    assert fields["sensor_version"] == "0.1.0"
+    assert fields["ingested_at"] == event.ingested_at
+    assert fields["session_id"] == ""
     assert fields["payload_json"] == '{"summary":"Frontmost app: Safari","title":"Safari"}'
 
 

@@ -11,6 +11,7 @@ from .policy import PolicyDecision, RedactionPolicy, RedactionResult
 from .retrieval import InMemoryNoteIndex, RetrievalNote
 from .sqlite_store import SQLiteAuditLog, SQLiteTimelineStore
 from .store import InMemoryEventStore
+from .storage_worker import RedisToSQLiteWorker
 from .streams import RedisStreamConsumer, RedisStreamPublisher, StreamMessage, stream_for_event
 
 __all__ = [
@@ -32,6 +33,7 @@ __all__ = [
     "Relationship",
     "RedisStreamConsumer",
     "RedisStreamPublisher",
+    "RedisToSQLiteWorker",
     "RetrievalNote",
     "SQLiteAuditLog",
     "SQLiteTimelineStore",

@@ -2,7 +2,17 @@ from dataclasses import dataclass, field
 
 from argus_services.event_gateway import EventGateway
 from argus_services.events import make_event
-from argus_services.streams import DLQ_STREAM, RedisStreamConsumer, parse_xpending, parse_xreadgroup
+from argus_services.sqlite_store import SQLiteTimelineStore
+from argus_services.storage_worker import RedisToSQLiteWorker
+from argus_services.streams import (
+    DLQ_STREAM,
+    RedisStreamConsumer,
+    StreamMessage,
+    event_from_stream_fields,
+    parse_xpending,
+    parse_xreadgroup,
+    xadd_fields,
+)
 
 
 @dataclass
@@ -195,3 +205,102 @@ def test_redis_consumer_reclaims_retryable_and_dead_letters_exhausted_pending():
 def test_redis_response_parsers_handle_empty_and_nested_shapes():
     assert parse_xreadgroup(None) == []
     assert parse_xpending([]) == []
+
+
+def test_redis_stream_fields_round_trip_full_event_contract():
+    event = make_event(
+        "activity.browser_page",
+        {"title": "Pricing", "domain": "vendor.example"},
+        source_device_id="macbook-test",
+        source_platform="macos",
+        sensor_id="argus-sensor-mac",
+        session_id="sess-1",
+        tags=["browser"],
+    )
+
+    round_tripped = event_from_stream_fields(xadd_fields(event))
+
+    assert round_tripped.event_id == event.event_id
+    assert round_tripped.schema_version == event.schema_version
+    assert round_tripped.source_device_id == "macbook-test"
+    assert round_tripped.sensor_version == event.sensor_version
+    assert round_tripped.ingested_at == event.ingested_at
+    assert round_tripped.session_id == "sess-1"
+    assert round_tripped.payload == event.payload
+    assert round_tripped.tags == ["browser"]
+
+
+class FakeStreamConsumer:
+    def __init__(self, messages):
+        self.messages = list(messages)
+        self.groups = []
+        self.acked = []
+        self.dead_lettered = []
+
+    def ensure_group(self, stream):
+        self.groups.append(stream)
+
+    def read(self, streams, *, count=10, block_ms=0):
+        return self.messages[:count]
+
+    def ack(self, stream, *redis_ids):
+        self.acked.extend((stream, redis_id) for redis_id in redis_ids)
+        return len(redis_ids)
+
+    def dead_letter(self, stream, *redis_ids, reason):
+        self.dead_lettered.extend((stream, redis_id, reason) for redis_id in redis_ids)
+        return ["dlq-1"]
+
+
+def test_redis_to_sqlite_worker_stores_events_and_acks(tmp_path):
+    event = make_event(
+        "activity.browser_page",
+        {"title": "Worker stored"},
+        source_platform="macos",
+    )
+    message = StreamMessage(
+        stream="stream:raw:macos",
+        redis_id="1778682379180-0",
+        fields=xadd_fields(event),
+    )
+    consumer = FakeStreamConsumer([message])
+    store = SQLiteTimelineStore(tmp_path / "timeline.db")
+
+    try:
+        worker = RedisToSQLiteWorker(
+            consumer=consumer,
+            store=store,
+            streams=["stream:raw:macos"],
+        )
+        stored = worker.process_once()
+
+        assert stored == 1
+        assert store.get(event.event_id).payload["title"] == "Worker stored"
+        assert consumer.acked == [("stream:raw:macos", "1778682379180-0")]
+        assert consumer.dead_lettered == []
+    finally:
+        store.close()
+
+
+def test_redis_to_sqlite_worker_dead_letters_unparseable_messages(tmp_path):
+    message = StreamMessage(
+        stream="stream:raw:macos",
+        redis_id="bad-0",
+        fields={"event_id": "missing-required-fields"},
+    )
+    consumer = FakeStreamConsumer([message])
+    store = SQLiteTimelineStore(tmp_path / "timeline.db")
+
+    try:
+        worker = RedisToSQLiteWorker(
+            consumer=consumer,
+            store=store,
+            streams=["stream:raw:macos"],
+        )
+        stored = worker.process_once()
+
+        assert stored == 0
+        assert consumer.acked == []
+        assert consumer.dead_lettered[0][0:2] == ("stream:raw:macos", "bad-0")
+    finally:
+        store.close()

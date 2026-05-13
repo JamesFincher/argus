@@ -77,7 +77,9 @@ ARGUS_TIMELINE_DB_PATH="$HOME/Library/Application Support/Argus/timeline.db" \
 The Docker Compose stack publishes Redis, Neo4j, Prometheus, and Grafana only
 on `127.0.0.1` by default. Redis protected mode is disabled for this local
 stack so the host event gateway can write through Docker's loopback-published
-port.
+port. Redis Streams carry the full event contract so workers can replay, ack,
+reclaim, dead-letter, and persist events into SQLite without raw data leaving
+the local machine.
 
 ## macOS App
 
