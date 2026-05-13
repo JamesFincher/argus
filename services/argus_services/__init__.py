@@ -9,7 +9,7 @@ from .metrics import METRIC_NAMES, MetricsRegistry
 from .perception import PerceptionOutput, PerceptionWorker, TemplateSummarizer
 from .policy import PolicyDecision, RedactionPolicy, RedactionResult
 from .retrieval import InMemoryNoteIndex, RetrievalNote
-from .sqlite_store import SQLiteTimelineStore
+from .sqlite_store import SQLiteAuditLog, SQLiteTimelineStore
 from .store import InMemoryEventStore
 from .streams import RedisStreamPublisher, stream_for_event
 
@@ -32,6 +32,7 @@ __all__ = [
     "Relationship",
     "RedisStreamPublisher",
     "RetrievalNote",
+    "SQLiteAuditLog",
     "SQLiteTimelineStore",
     "TemplateSummarizer",
     "ToolRegistry",

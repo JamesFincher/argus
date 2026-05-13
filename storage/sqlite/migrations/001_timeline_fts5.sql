@@ -27,6 +27,21 @@ CREATE INDEX IF NOT EXISTS idx_events_platform_type ON events(source_platform, e
 CREATE INDEX IF NOT EXISTS idx_events_dedupe_key ON events(dedupe_key);
 CREATE INDEX IF NOT EXISTS idx_events_scope ON events(semantic_scope);
 
+CREATE TABLE IF NOT EXISTS audit_records (
+  audit_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  actor TEXT NOT NULL,
+  tool TEXT NOT NULL,
+  scope TEXT NOT NULL,
+  event_count INTEGER NOT NULL,
+  redactions_json TEXT NOT NULL DEFAULT '[]',
+  allowed INTEGER NOT NULL CHECK (allowed IN (0, 1)),
+  reason TEXT NOT NULL,
+  recorded_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_records_recorded_at ON audit_records(recorded_at);
+CREATE INDEX IF NOT EXISTS idx_audit_records_actor_tool ON audit_records(actor, tool);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS event_fts USING fts5(
   event_id UNINDEXED,
   event_type,

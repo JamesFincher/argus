@@ -8,6 +8,7 @@ from pathlib import Path
 from threading import RLock
 from typing import Any
 
+from .audit import AuditRecord
 from .events import EventEnvelope
 from .policy import RedactionPolicy
 from .store import event_summary
@@ -172,6 +173,76 @@ class SQLiteTimelineStore:
         return event_summary(event)
 
 
+class SQLiteAuditLog:
+    def __init__(
+        self,
+        db_path: str | Path,
+        *,
+        migration_path: str | Path = DEFAULT_MIGRATION,
+    ) -> None:
+        self.db_path = Path(db_path)
+        self.migration_path = Path(migration_path)
+        if self.db_path != Path(":memory:"):
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._lock = RLock()
+        self.connection = sqlite3.connect(str(self.db_path), check_same_thread=False)
+        self.connection.row_factory = sqlite3.Row
+        self.connection.execute("PRAGMA foreign_keys = ON")
+        self.apply_migrations()
+
+    def apply_migrations(self) -> None:
+        with self._lock:
+            self.connection.executescript(self.migration_path.read_text(encoding="utf-8"))
+            self.connection.commit()
+
+    def close(self) -> None:
+        with self._lock:
+            self.connection.close()
+
+    def record(self, record: AuditRecord) -> AuditRecord:
+        with self._lock:
+            self.connection.execute(
+                """
+                INSERT INTO audit_records (
+                  actor,
+                  tool,
+                  scope,
+                  event_count,
+                  redactions_json,
+                  allowed,
+                  reason,
+                  recorded_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    record.actor,
+                    record.tool,
+                    record.scope,
+                    record.event_count,
+                    _json(record.redactions_applied),
+                    1 if record.allowed else 0,
+                    record.reason,
+                    record.recorded_at,
+                ),
+            )
+            self.connection.commit()
+        return record
+
+    def recent(self, limit: int = 20) -> list[AuditRecord]:
+        with self._lock:
+            rows = self.connection.execute(
+                """
+                SELECT *
+                FROM audit_records
+                ORDER BY recorded_at DESC, audit_id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [audit_record_from_row(row) for row in rows]
+
+
 def event_from_row(row: sqlite3.Row) -> EventEnvelope:
     return EventEnvelope.from_dict(
         {
@@ -193,6 +264,19 @@ def event_from_row(row: sqlite3.Row) -> EventEnvelope:
             "relationships": json.loads(row["relationships_json"]),
             "tags": json.loads(row["tags_json"]),
         }
+    )
+
+
+def audit_record_from_row(row: sqlite3.Row) -> AuditRecord:
+    return AuditRecord(
+        actor=row["actor"],
+        tool=row["tool"],
+        scope=row["scope"],
+        event_count=row["event_count"],
+        redactions_applied=json.loads(row["redactions_json"]),
+        allowed=bool(row["allowed"]),
+        reason=row["reason"],
+        recorded_at=row["recorded_at"],
     )
 
 

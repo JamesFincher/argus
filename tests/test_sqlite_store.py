@@ -1,10 +1,16 @@
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 
+from argus_services.audit import AuditRecord
 from argus_services.events import make_event
 from argus_services.event_gateway import store_from_env
 from argus_services.policy import RedactionPolicy
-from argus_services.sqlite_store import SQLiteTimelineStore, fts_query, semantic_scope_for
+from argus_services.sqlite_store import (
+    SQLiteAuditLog,
+    SQLiteTimelineStore,
+    fts_query,
+    semantic_scope_for,
+)
 
 
 def test_sqlite_timeline_store_bootstraps_migration(tmp_path):
@@ -19,6 +25,7 @@ def test_sqlite_timeline_store_bootstraps_migration(tmp_path):
 
         assert "events" in tables
         assert "event_fts" in tables
+        assert "audit_records" in tables
     finally:
         store.close()
 
@@ -134,6 +141,45 @@ def test_gateway_store_from_env_uses_sqlite_when_configured(tmp_path, monkeypatc
             assert connection.execute("SELECT count(*) FROM events").fetchone()[0] == 1
     finally:
         store.close()
+
+
+def test_sqlite_audit_log_records_and_reads_recent_entries(tmp_path):
+    audit_log = SQLiteAuditLog(tmp_path / "timeline.db")
+    first = AuditRecord(
+        actor="hermes-session-1",
+        tool="sensor_expand_event",
+        scope="full",
+        event_count=1,
+        redactions_applied=[],
+        allowed=False,
+        reason="requires approval",
+        recorded_at="2026-05-13T14:00:00Z",
+    )
+    second = AuditRecord(
+        actor="hermes-session-1",
+        tool="sensor_timeline_search",
+        scope="pricing",
+        event_count=2,
+        redactions_applied=["email"],
+        allowed=True,
+        reason="redacted timeline search",
+        recorded_at="2026-05-13T14:01:00Z",
+    )
+
+    try:
+        assert audit_log.record(first) is first
+        audit_log.record(second)
+        recent = audit_log.recent(limit=2)
+
+        assert [record.tool for record in recent] == [
+            "sensor_timeline_search",
+            "sensor_expand_event",
+        ]
+        assert recent[0].redactions_applied == ["email"]
+        assert recent[0].allowed is True
+        assert recent[1].allowed is False
+    finally:
+        audit_log.close()
 
 
 def test_sqlite_timeline_store_accepts_threaded_gateway_writes(tmp_path):
