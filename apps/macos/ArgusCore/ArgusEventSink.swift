@@ -111,11 +111,15 @@ public actor LoopbackEventGatewaySink: ArgusEventSink {
         self.encoder.outputFormatting = [.sortedKeys]
     }
 
+    public static func defaultLocalGateway() throws -> LoopbackEventGatewaySink {
+        try LoopbackEventGatewaySink(endpoint: URL(string: "http://127.0.0.1:8765/events")!)
+    }
+
     public func append(_ event: ArgusEventEnvelope) async throws {
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try encoder.encode(event)
+        request.httpBody = try encoder.encode(event.gatewayEnvelope())
 
         let (_, response) = try await session.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {

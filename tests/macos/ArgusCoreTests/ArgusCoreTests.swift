@@ -134,6 +134,93 @@ final class ArgusCoreTests: XCTestCase {
         )
     }
 
+    func testGatewayEnvelopeMatchesPythonEventContract() throws {
+        let observedAt = Date(timeIntervalSince1970: 1_234)
+        let ingestedAt = Date(timeIntervalSince1970: 1_235)
+        let event = ArgusEventEnvelope(
+            id: UUID(uuidString: "11111111-1111-1111-1111-111111111111")!,
+            observedAt: observedAt,
+            platform: .macOS,
+            source: "accessibility.focused_field",
+            kind: .focusedField,
+            summary: "Focused field: value=[REDACTED_API_KEY]",
+            payload: [
+                "role": .string("AXTextField"),
+                "has_value": .bool(true)
+            ],
+            sensitivity: .high,
+            redactionsApplied: ["api_key"],
+            rawReference: "local-ax-focused-field"
+        )
+
+        let gateway = event.gatewayEnvelope(
+            sourceDeviceID: "macbook-test",
+            sensorID: "argus-sensor-mac-test",
+            ingestedAt: ingestedAt
+        )
+
+        XCTAssertEqual(gateway.eventID, "11111111-1111-1111-1111-111111111111")
+        XCTAssertEqual(gateway.eventType, "activity.focused_field")
+        XCTAssertEqual(gateway.schemaVersion, "2026-05-11")
+        XCTAssertEqual(gateway.sourceDeviceID, "macbook-test")
+        XCTAssertEqual(gateway.sourcePlatform, "macos")
+        XCTAssertEqual(gateway.sensorID, "argus-sensor-mac-test")
+        XCTAssertEqual(gateway.observedAt, "1970-01-01T00:20:34.000Z")
+        XCTAssertEqual(gateway.ingestedAt, "1970-01-01T00:20:35.000Z")
+        XCTAssertEqual(gateway.sensitivity, "high")
+        XCTAssertEqual(gateway.rawScope, "ephemeral")
+        XCTAssertEqual(gateway.payload["summary"], .string("Focused field: value=[REDACTED_API_KEY]"))
+        XCTAssertEqual(gateway.payload["sensor_source"], .string("accessibility.focused_field"))
+        XCTAssertEqual(gateway.payload["swift_event_kind"], .string("focused_field"))
+        XCTAssertEqual(gateway.payload["raw_reference"], .string("local-ax-focused-field"))
+        XCTAssertEqual(gateway.redactions, [
+            ArgusGatewayRedaction(kind: "api_key", path: "$.summary", replacement: "[REDACTED]")
+        ])
+        XCTAssertTrue(gateway.tags.contains("macos"))
+        XCTAssertTrue(gateway.tags.contains("accessibility.focused_field"))
+        XCTAssertTrue(gateway.tags.contains("focused_field"))
+    }
+
+    func testGatewayEnvelopeEncodesCanonicalSnakeCaseKeys() throws {
+        let event = ArgusEventFactory.permissionState(
+            accessibilityTrusted: true,
+            screenRecordingGranted: false
+        )
+        let gateway = event.gatewayEnvelope(sourceDeviceID: "macbook-test")
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let data = try encoder.encode(gateway)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+
+        XCTAssertEqual(object["event_type"] as? String, "system.permission_state")
+        XCTAssertEqual(object["source_device_id"] as? String, "macbook-test")
+        XCTAssertEqual(object["source_platform"] as? String, "macos")
+        XCTAssertEqual(object["sensor_id"] as? String, "argus-sensor-mac")
+        XCTAssertEqual(object["raw_scope"] as? String, "none")
+        XCTAssertNotNil(object["event_id"])
+        XCTAssertNil(object["id"])
+        XCTAssertNil(object["kind"])
+        XCTAssertNil(object["platform"])
+    }
+
+    func testGatewayEnvelopeMapsRestrictedSwiftSensitivityToBlocked() {
+        let event = ArgusEventEnvelope(
+            platform: .macOS,
+            source: "screencapturekit.vision_ocr",
+            kind: .screenFrame,
+            summary: "Card [REDACTED_CARD] was visible",
+            sensitivity: .restricted,
+            redactionsApplied: ["credit_card"],
+            rawReference: "local-screen-ocr-frame"
+        )
+
+        let gateway = event.gatewayEnvelope(sourceDeviceID: "macbook-test")
+
+        XCTAssertEqual(gateway.eventType, "activity.screen_frame_ocr")
+        XCTAssertEqual(gateway.sensitivity, "blocked")
+        XCTAssertEqual(gateway.rawScope, "ephemeral")
+    }
+
     func testFocusedFieldFactoryRedactsSensitiveValueInSummary() {
         let event = ArgusEventFactory.focusedField(
             role: "AXTextField",

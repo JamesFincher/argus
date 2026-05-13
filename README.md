@@ -78,4 +78,5 @@ open "dist/Argus Sensor.app"
 
 The app includes permission status, pause/resume controls, a visible menu bar
 status item, NSWorkspace/Accessibility event paths, local JSONL spooling, and a
-consent-gated ScreenCaptureKit/Vision OCR skeleton that redacts before summary.
+loopback event-gateway sink. It also includes a consent-gated
+ScreenCaptureKit/Vision OCR skeleton that redacts before summary.
