@@ -55,6 +55,29 @@ final class ArgusCoreTests: XCTestCase {
         XCTAssertEqual(try decoder.decode(ArgusEventEnvelope.self, from: data), event)
     }
 
+    func testDefaultEventIDsUseSortableUUIDv7Layout() {
+        let first = ArgusEventID.uuidV7(
+            now: Date(timeIntervalSince1970: 1_000),
+            randomBytes: Array(repeating: 0, count: 10)
+        )
+        let second = ArgusEventID.uuidV7(
+            now: Date(timeIntervalSince1970: 1_001),
+            randomBytes: Array(repeating: 0, count: 10)
+        )
+        let generated = ArgusEventEnvelope(
+            platform: .macOS,
+            source: "unit-test",
+            kind: .frontmostWindow,
+            summary: "generated"
+        )
+        let generatedID = generated.id.uuidString.lowercased()
+
+        XCTAssertLessThan(first.uuidString.lowercased(), second.uuidString.lowercased())
+        XCTAssertEqual(first.uuidString.lowercased().dropFirst(14).first, "7")
+        XCTAssertEqual(generatedID.dropFirst(14).first, "7")
+        XCTAssertTrue(["8", "9", "a", "b"].contains(String(generatedID.dropFirst(19).first!)))
+    }
+
     func testLocalEventBufferReturnsRecentEventsFirst() async {
         let buffer = LocalEventBuffer(limit: 3)
         let first = ArgusEventEnvelope(

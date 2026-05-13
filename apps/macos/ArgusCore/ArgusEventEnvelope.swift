@@ -1,5 +1,47 @@
 import Foundation
 
+public enum ArgusEventID {
+    public static func uuidV7(
+        now: Date = Date(),
+        randomBytes: [UInt8]? = nil
+    ) -> UUID {
+        let unixMilliseconds = UInt64(now.timeIntervalSince1970 * 1_000) & 0xffff_ffff_ffff
+        let entropy = normalizedEntropy(randomBytes)
+        var bytes = [UInt8](repeating: 0, count: 16)
+
+        bytes[0] = UInt8((unixMilliseconds >> 40) & 0xff)
+        bytes[1] = UInt8((unixMilliseconds >> 32) & 0xff)
+        bytes[2] = UInt8((unixMilliseconds >> 24) & 0xff)
+        bytes[3] = UInt8((unixMilliseconds >> 16) & 0xff)
+        bytes[4] = UInt8((unixMilliseconds >> 8) & 0xff)
+        bytes[5] = UInt8(unixMilliseconds & 0xff)
+        bytes[6] = 0x70 | (entropy[0] & 0x0f)
+        bytes[7] = entropy[1]
+        bytes[8] = 0x80 | (entropy[2] & 0x3f)
+        bytes[9] = entropy[3]
+        bytes[10] = entropy[4]
+        bytes[11] = entropy[5]
+        bytes[12] = entropy[6]
+        bytes[13] = entropy[7]
+        bytes[14] = entropy[8]
+        bytes[15] = entropy[9]
+
+        return UUID(uuid: (
+            bytes[0], bytes[1], bytes[2], bytes[3],
+            bytes[4], bytes[5], bytes[6], bytes[7],
+            bytes[8], bytes[9], bytes[10], bytes[11],
+            bytes[12], bytes[13], bytes[14], bytes[15]
+        ))
+    }
+
+    private static func normalizedEntropy(_ randomBytes: [UInt8]?) -> [UInt8] {
+        if let randomBytes {
+            return Array((randomBytes + Array(repeating: 0, count: 10)).prefix(10))
+        }
+        return (0..<10).map { _ in UInt8.random(in: .min ... .max) }
+    }
+}
+
 public enum ArgusPlatform: String, Codable, Equatable, Sendable {
     case macOS = "macos"
     case iOS = "ios"
@@ -103,7 +145,7 @@ public struct ArgusEventEnvelope: Codable, Equatable, Identifiable, Sendable {
     public var rawReference: String?
 
     public init(
-        id: UUID = UUID(),
+        id: UUID = ArgusEventID.uuidV7(),
         observedAt: Date = Date(),
         platform: ArgusPlatform,
         source: String,

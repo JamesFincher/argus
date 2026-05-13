@@ -5,11 +5,17 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from hashlib import sha256
+from secrets import randbits
+from threading import Lock
 from typing import Any, Literal
-from uuid import uuid4
+from uuid import UUID
 
 Sensitivity = Literal["low", "medium", "high", "blocked"]
 RawScope = Literal["none", "ephemeral", "durable-by-policy"]
+
+_EVENT_ID_LOCK = Lock()
+_LAST_EVENT_ID_MS = -1
+_LAST_EVENT_ID_RANDOM = 0
 
 
 def utc_now_iso() -> str:
@@ -19,6 +25,38 @@ def utc_now_iso() -> str:
 def stable_dedupe_key(*parts: object) -> str:
     text = "\x1f".join(str(part) for part in parts if part is not None)
     return "sha256:" + sha256(text.encode("utf-8")).hexdigest()
+
+
+def sortable_event_id(now: datetime | None = None) -> str:
+    """Return a UUIDv7-style event id whose string form sorts by creation time."""
+
+    global _LAST_EVENT_ID_MS, _LAST_EVENT_ID_RANDOM
+
+    timestamp = now or datetime.now(timezone.utc)
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.replace(tzinfo=timezone.utc)
+    unix_ms = int(timestamp.timestamp() * 1000)
+
+    with _EVENT_ID_LOCK:
+        if unix_ms > _LAST_EVENT_ID_MS:
+            _LAST_EVENT_ID_MS = unix_ms
+            _LAST_EVENT_ID_RANDOM = randbits(74)
+        else:
+            _LAST_EVENT_ID_MS = max(_LAST_EVENT_ID_MS, unix_ms)
+            _LAST_EVENT_ID_RANDOM = (_LAST_EVENT_ID_RANDOM + 1) & ((1 << 74) - 1)
+        unix_ms = _LAST_EVENT_ID_MS
+        random_bits = _LAST_EVENT_ID_RANDOM
+
+    rand_a = random_bits >> 62
+    rand_b = random_bits & ((1 << 62) - 1)
+    uuid_int = (
+        ((unix_ms & ((1 << 48) - 1)) << 80)
+        | (0x7 << 76)
+        | ((rand_a & 0xFFF) << 64)
+        | (0b10 << 62)
+        | rand_b
+    )
+    return str(UUID(int=uuid_int))
 
 
 @dataclass(frozen=True)
@@ -54,7 +92,7 @@ class EventEnvelope:
     source_platform: str
     sensor_id: str
     payload: dict[str, Any]
-    event_id: str = field(default_factory=lambda: uuid4().hex)
+    event_id: str = field(default_factory=sortable_event_id)
     schema_version: str = "2026-05-11"
     sensor_version: str = "0.1.0"
     observed_at: str = field(default_factory=utc_now_iso)
