@@ -20,6 +20,34 @@ def test_event_gateway_runner_sets_services_pythonpath():
     assert "http://${HOST}:${PORT}/health" in start_script
 
 
+def test_repo_bootstrap_script_sets_up_full_argus_system_for_hermes():
+    setup_script = read("scripts/dev/setup_argus_system.sh")
+    mcp_runner = read("scripts/dev/run_argus_sensor_mcp.sh")
+    readme = read("README.md")
+
+    assert "uv sync" in setup_script
+    assert 'uv pip install -e "$REPO_ROOT"' in setup_script
+    assert "scripts/dev/start_mesh.sh" in setup_script
+    assert "scripts/dev/start_event_gateway.sh" in setup_script
+    assert "scripts/dev/start_storage_worker.sh" in setup_script
+    assert "scripts/dev/package_macos_app.sh release" in setup_script
+    assert "scripts/install_native_messaging_host.py install" in setup_script
+    assert "hermes mcp add argus-sensor" in setup_script
+    assert "scripts/dev/run_argus_sensor_mcp.sh" in setup_script
+    assert "hermes mcp test argus-sensor" in setup_script
+    assert "uv run python scripts/verify_hermes_runtime.py" in setup_script
+    assert "Argus setup complete." in setup_script
+
+    assert "exec uv run argus-sensor-mcp" in mcp_runner
+    assert "ARGUS_TIMELINE_DB_PATH" in mcp_runner
+    assert 'if [[ -n "${ARGUS_LANCEDB_PATH:-}" ]]' in mcp_runner
+    assert 'ARGUS_LANCEDB_PATH="${ARGUS_LANCEDB_PATH:-}"' in setup_script
+    assert 'command+=(--env "ARGUS_LANCEDB_PATH=$ARGUS_LANCEDB_PATH")' in setup_script
+    assert "Hermes Bootstrap" in readme
+    assert "scripts/dev/setup_argus_system.sh" in readme
+    assert "Do not stop at summarizing the README." in readme
+
+
 def test_macos_app_packaging_script_creates_bundle_structure():
     script = read("scripts/dev/package_macos_app.sh")
 

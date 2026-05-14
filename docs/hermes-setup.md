@@ -17,12 +17,13 @@ export ARGUS_HOME="$HOME/Library/Application Support/Argus"
 mkdir -p "$ARGUS_HOME"
 
 export ARGUS_TIMELINE_DB_PATH="$ARGUS_HOME/timeline.db"
-export ARGUS_LANCEDB_PATH="$ARGUS_HOME/notes.lancedb"
 export ARGUS_APPROVAL_TOKEN="$(uuidgen | tr '[:upper:]' '[:lower:]')"
 ```
 
 Do not commit `ARGUS_APPROVAL_TOKEN`. It is only for explicit full raw event
 expansion; sanitized summaries and redacted tool results do not require it.
+Set `ARGUS_LANCEDB_PATH="$ARGUS_HOME/notes.lancedb"` only after installing the
+optional `lancedb` package; the default bootstrap leaves LanceDB disabled.
 
 ## 2. Install Argus For Local Commands
 
@@ -41,6 +42,17 @@ The package installs these MCP-compatible launcher names:
 
 They all start the same stdio MCP server. Use `argus-sensor-mcp` in new setup
 commands so the name clearly matches the Argus sensor system.
+
+For a full repo-driven bootstrap, run this instead of performing the individual
+steps manually:
+
+```sh
+scripts/dev/setup_argus_system.sh
+```
+
+That script installs the package, starts the local mesh/gateway/worker,
+packages the macOS app, and registers Hermes MCP with
+`scripts/dev/run_argus_sensor_mcp.sh` so Hermes launches Argus from this repo.
 
 ## 3. Start The Local Argus Stack
 
@@ -71,7 +83,6 @@ The verified local CLI shape is:
 hermes mcp add argus-sensor \
   --command uv \
   --env "ARGUS_TIMELINE_DB_PATH=$ARGUS_TIMELINE_DB_PATH" \
-  --env "ARGUS_LANCEDB_PATH=$ARGUS_LANCEDB_PATH" \
   --env "ARGUS_APPROVAL_TOKEN=$ARGUS_APPROVAL_TOKEN" \
   --args run argus-sensor-mcp
 ```
@@ -103,7 +114,6 @@ hermes mcp remove argus-sensor
 hermes mcp add argus-sensor \
   --command "$(command -v uv)" \
   --env "ARGUS_TIMELINE_DB_PATH=$ARGUS_TIMELINE_DB_PATH" \
-  --env "ARGUS_LANCEDB_PATH=$ARGUS_LANCEDB_PATH" \
   --env "ARGUS_APPROVAL_TOKEN=$ARGUS_APPROVAL_TOKEN" \
   --args run argus-sensor-mcp
 ```

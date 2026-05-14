@@ -6,6 +6,40 @@ user-approved local signals, Argus Core normalizes and redacts them, Argus Mesh
 keeps local transport/storage on loopback, and Hermes integration reads
 policy-checked summaries/tools instead of raw firehose context.
 
+## Hermes Bootstrap
+
+If you are Hermes/Gengar/Codex pointed at this repository to install Argus, run
+the repo bootstrap first. Do not stop at summarizing the README.
+
+```sh
+scripts/dev/setup_argus_system.sh
+```
+
+That one command installs the editable Python package, writes a local
+`argus.env`, starts Redis/Neo4j/Prometheus/Grafana on loopback, starts the
+Argus event gateway and storage worker, packages the macOS app/DMG, registers
+the Argus MCP server in Hermes using this repo as the launch target, runs the
+Hermes MCP test, and prints the dashboard URL.
+
+Useful setup inputs:
+
+```sh
+# Optional: install the browser native messaging manifest during bootstrap.
+export ARGUS_NATIVE_ALLOWED_ORIGIN="chrome-extension://<extension-id>/"
+
+# Optional: skip heavyweight pieces during development.
+export ARGUS_PACKAGE_MACOS_APP=0
+export ARGUS_CONFIGURE_HERMES=0
+
+scripts/dev/setup_argus_system.sh
+```
+
+The Hermes MCP entry points back to
+`scripts/dev/run_argus_sensor_mcp.sh`, so Hermes can launch Argus from this
+checkout without relying on the current shell directory. macOS Accessibility
+and Screen Recording prompts are still user-approved system prompts; the setup
+script packages and starts the system, but it does not bypass those permissions.
+
 ## Product Map
 
 - **Argus Core:** event envelopes, redaction, perception, policy, MCP tools.
@@ -139,9 +173,8 @@ The verified local CLI setup path is:
 
 ```sh
 hermes mcp add argus-sensor \
-  --command uv \
+  --command "$PWD/scripts/dev/run_argus_sensor_mcp.sh" \
   --env "ARGUS_TIMELINE_DB_PATH=$HOME/Library/Application Support/Argus/timeline.db" \
-  --args run argus-sensor-mcp
 hermes mcp test argus-sensor
 ```
 
