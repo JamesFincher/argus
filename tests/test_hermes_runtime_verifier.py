@@ -1,5 +1,6 @@
 import importlib.util
 import sys
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -160,8 +161,8 @@ def test_run_direct_mcp_smoke_lists_tools_and_blocks_raw(monkeypatch, tmp_path):
             return {
                 "result": {
                     "tools": [
-                        {"name": "sensor_get_recent_notes"},
-                        {"name": "sensor_expand_event"},
+                        {"name": name}
+                        for name in verifier.EXPECTED_MCP_TOOLS
                     ]
                 }
             }
@@ -171,7 +172,7 @@ def test_run_direct_mcp_smoke_lists_tools_and_blocks_raw(monkeypatch, tmp_path):
 
     tools, raw_blocked = verifier.run_direct_mcp_smoke(tmp_path / "timeline.sqlite3")
 
-    assert tools == ["sensor_get_recent_notes", "sensor_expand_event"]
+    assert tools == list(verifier.EXPECTED_MCP_TOOLS)
     assert raw_blocked is True
     assert calls[1]["params"]["arguments"]["event_id"] == "event-1"
 
@@ -186,6 +187,25 @@ def test_run_direct_mcp_smoke_reports_missing_tools(monkeypatch, tmp_path):
 
     with pytest.raises(RuntimeError, match="tools missing"):
         verifier.run_direct_mcp_smoke(tmp_path / "timeline.sqlite3")
+
+
+def test_setup_docs_match_verifier_constants_and_package_metadata():
+    root = SCRIPT_PATH.parents[1]
+    setup = (root / "docs" / "hermes-setup.md").read_text(encoding="utf-8")
+    pyproject = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+
+    assert f"hermes mcp add {verifier.ARGUS_MCP_SERVER_NAME}" in setup
+    assert f"hermes mcp test {verifier.ARGUS_MCP_SERVER_NAME}" in setup
+    assert f"--command {verifier.ARGUS_MCP_COMMAND}" in setup
+    assert "--args " + " ".join(verifier.ARGUS_MCP_ARGS) in setup
+
+    for tool in verifier.EXPECTED_MCP_TOOLS:
+        assert f"`{tool}`" in setup
+
+    entry_points = pyproject["project"]["entry-points"]
+    for group in verifier.EXPECTED_PLUGIN_GROUPS:
+        assert entry_points[group][verifier.EXPECTED_PLUGIN_NAME] == verifier.EXPECTED_PLUGIN_VALUE
+        assert f"{group}:argus = {verifier.EXPECTED_PLUGIN_VALUE}" in setup
 
 
 def test_hermes_version_returns_first_output_line(monkeypatch):
@@ -210,7 +230,7 @@ def test_verify_returns_clear_blocker_when_hermes_is_missing(monkeypatch, tmp_pa
     monkeypatch.setattr(
         verifier,
         "run_direct_mcp_smoke",
-        lambda _timeline_db_path: (["sensor_get_recent_notes", "sensor_expand_event"], True),
+        lambda _timeline_db_path: (list(verifier.EXPECTED_MCP_TOOLS), True),
     )
     monkeypatch.setattr(
         verifier,
@@ -239,7 +259,7 @@ def test_verify_runs_live_hermes_mcp_when_command_exists(monkeypatch, tmp_path):
     monkeypatch.setattr(
         verifier,
         "run_direct_mcp_smoke",
-        lambda _timeline_db_path: (["sensor_get_recent_notes", "sensor_expand_event"], True),
+        lambda _timeline_db_path: (list(verifier.EXPECTED_MCP_TOOLS), True),
     )
     monkeypatch.setattr(verifier, "package_origin", lambda _module_name: None)
 

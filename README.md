@@ -112,6 +112,10 @@ Argus exposes the local sensor tools over stdio JSON-RPC for Hermes. The package
 installs three compatible launcher names that all run the same transport:
 `argus-mcp-stdio`, `argus-sensor-mcp`, and `hermes-sensor-mcp`.
 
+For the full guided setup, including exact Hermes prompts, safe smoke prompts,
+plugin discovery boundaries, and troubleshooting, see
+[`docs/hermes-setup.md`](docs/hermes-setup.md).
+
 Minimal tool-list smoke test:
 
 ```sh
@@ -130,6 +134,18 @@ mcp_servers:
     env:
       ARGUS_TIMELINE_DB_PATH: "/Users/james/Library/Application Support/Argus/timeline.db"
 ```
+
+The verified local CLI setup path is:
+
+```sh
+hermes mcp add argus-sensor \
+  --command uv \
+  --env "ARGUS_TIMELINE_DB_PATH=$HOME/Library/Application Support/Argus/timeline.db" \
+  --args run argus-sensor-mcp
+hermes mcp test argus-sensor
+```
+
+If Hermes prompts to confirm adding the server, answer `Y`.
 
 MCP tools return sanitized content by default. Full raw event expansion remains
 policy-gated and every agent-facing call records an audit entry in the local
@@ -160,6 +176,17 @@ Install the package into the Python environment Hermes scans for plugins:
 ```sh
 uv pip install -e /Users/james/code/argus/argus
 ```
+
+Then verify that the active Hermes runtime can see the plugin before relying on
+hook injection:
+
+```sh
+hermes plugins list
+hermes plugins enable argus
+```
+
+If `argus` is missing from `hermes plugins list`, keep using the live-verified
+MCP path and install Argus into the Python environment Hermes actually scans.
 
 Hermes plugin discovery can load the entry point and call `register(ctx)`,
 where `ctx` provides `register_hook(name, handler)`. The plugin registers:
@@ -236,5 +263,6 @@ open "dist/Argus Sensor.app"
 
 The app includes permission status, pause/resume controls, a visible menu bar
 status item, NSWorkspace/Accessibility event paths, local JSONL spooling, and a
-loopback event-gateway sink. It also includes a consent-gated
-ScreenCaptureKit/Vision OCR skeleton that redacts before summary.
+loopback event-gateway sink. It also includes a consent-gated one-shot
+ScreenCaptureKit/Vision OCR path that filters low-confidence observations and
+redacts before summary.

@@ -11,6 +11,8 @@ from pathlib import Path
 
 REQUIRED_PATHS = (
     "argus_spec.md",
+    "docs/deep-research-alignment.md",
+    "docs/hermes-setup.md",
     "docs/implementation-plan.md",
     "docs/spec-checklist.md",
     "scripts/verify_spec.py",
@@ -36,6 +38,21 @@ REQUIRED_TEXT = {
         "MCP discovery test",
         "Redis replay test",
         "sensitive-surface suppression test",
+    ),
+    "docs/hermes-setup.md": (
+        "hermes mcp add argus-sensor",
+        "hermes mcp test argus-sensor",
+        "ARGUS_TIMELINE_DB_PATH",
+        "hermes_agent.plugins:argus",
+        '{"action": "block", "message": "..."}',
+        "If `argus` does not appear",
+    ),
+    "docs/deep-research-alignment.md": (
+        "Hybrid local-first architecture",
+        "hermes_agent.plugins",
+        '{"action": "block", "message": "..."}',
+        "Redis-backed live-stack variant",
+        "plugin package contract is tested",
     ),
 }
 

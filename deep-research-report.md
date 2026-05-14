@@ -4,16 +4,16 @@
 
 The best setup for your use case is a **hybrid local-first architecture**: send all sensor signals into **Argus as normalized local events**, store them in a **local timeline and optional retrieval index**, expose **detail-on-demand through an Argus MCP server**, and inject only a **short redacted ambient summary** into Hermes on each turn through the `pre_llm_call` plugin hook. That matches the strongest official Hermes extension surfaces today: plugin hooks for per-turn context injection, MCP for external tool discovery, and the API server only when you need a UI or an external controller. citeturn13view2turn13view3turn17view0turn13view5turn20view0
 
-That approach is also the one Argus itself is already leaning toward. The Argus spec explicitly recommends **not** stuffing a continuous firehose of sensor notes into the prompt; instead it recommends injecting a short ambient note via `pre_llm_call`, letting Hermes call MCP tools for details, keeping raw evidence referenced by `event_id`, and expanding raw evidence only after a policy gate approves it. The current codebase contains the core pieces for exactly that pattern: a normalized event envelope, a loopback-only event gateway, a local MCP tool surface, a stdio MCP adapter, and a Hermes plugin skeleton. citeturn27view2turn27view3turn40view0turn32view0turn38view0turn28view1
+That approach is also the one Argus itself is already leaning toward. The Argus spec explicitly recommends **not** stuffing a continuous firehose of sensor notes into the prompt; instead it recommends injecting a short ambient note via `pre_llm_call`, letting Hermes call MCP tools for details, keeping raw evidence referenced by `event_id`, and expanding raw evidence only after a policy gate approves it. The current codebase contains the core pieces for exactly that pattern: a normalized event envelope, a loopback-only event gateway, a local MCP tool surface, a stdio MCP adapter, and a Hermes plugin module. citeturn27view2turn27view3turn40view0turn32view0turn38view0turn28view1
 
-The two most important implementation fixes before you rely on this in the latest Hermes line are compatibility fixes. First, **Argus currently uses the entry-point group `hermes.plugins`**, while the current official Hermes plugin docs use **`hermes_agent.plugins`** for pip-distributed plugins. Second, **Argus returns `{"block": true, "reason": ...}` from `pre_tool_call`**, while Hermes’ documented Python-plugin contract shows the veto shape as **`{"action": "block", "message": ...}`**. I would normalize Argus to the documented Hermes contract instead of assuming backward compatibility. citeturn29view0turn29view1turn15view0turn18view4turn16view2
+Those compatibility fixes are now implemented in Argus. The package publishes the documented **`hermes_agent.plugins`** entry-point group and keeps legacy **`hermes.plugins`** compatibility, and `pre_tool_call` returns Hermes' documented veto shape, **`{"action": "block", "message": ...}`**. The remaining runtime boundary is plugin enablement: the MCP path is live-verified, while the plugin hook path must be confirmed in the active Hermes environment with `hermes plugins list` showing `argus`. citeturn29view0turn29view1turn15view0turn18view4turn16view2
 
 For your concrete sensor examples, this means:
 
 - **Light switch / home events** should become compact structured Argus events such as `activity.device_state` or `system.external_signal`, stored locally and summarized when relevant.
 - **Computer activity** should flow in as `activity.app_focus`, `activity.window_focus`, `activity.focused_field`, and similar typed events.
 - **Browser and website activity** should use the existing browser/native-messaging shape Argus already models, because that path is already wired from a page-context message into an `activity.browser_page` event sent to the local gateway.
-- **Phone-derived events** should follow the same envelope and same local pipeline, but stay at a higher level unless you are on a platform that legitimately exposes the signal via public APIs. The Argus spec already defines event families for files, browser, health, device usage, reminders, and more, even where the current codebase is still a skeleton. citeturn27view5turn40view5turn40view0turn27view4
+- **Phone-derived events** should follow the same envelope and same local pipeline, but stay at a higher level unless you are on a platform that legitimately exposes the signal via public APIs. The Argus spec already defines event families for files, browser, health, device usage, reminders, and more; the macOS/browser MVP paths exist now, while richer mobile and specialty collectors remain later work. citeturn27view5turn40view5turn40view0turn27view4
 
 ## Hermes Agent surfaces that matter for sensor injection
 
@@ -49,7 +49,7 @@ At the transport layer, Argus has **Redis stream routing** with separate raw str
 
 At the storage and retrieval layer, Argus uses a **SQLite timeline store with FTS5** plus an **audit log**, and it has a retrieval abstraction with an in-memory note index or a LanceDB-backed note index. In the MCP layer, timeline search first consults the note index when available and then searches or scans the timeline store, while workflow-pattern discovery can come either from Neo4j or from local timeline transitions. citeturn32view3turn32view4turn31view6turn38view0
 
-At the Hermes-facing layer, Argus includes both a **local MCP tool surface** and a **Hermes plugin skeleton**. The MCP surface registers tools for recent-note summaries, event expansion, timeline search, workflow-pattern search, scope pause, scope forget, and session-brief export. The stdio adapter implements a minimal MCP-compatible JSON-RPC dispatcher with `initialize`, `tools/list`, and `tools/call`. The Hermes plugin skeleton wires `pre_llm_call` to `sensor_get_recent_notes` and `pre_tool_call` to event-expansion policy checks. citeturn32view0turn32view1turn32view4turn32view5turn38view3turn38view4turn38view5turn28view1turn28view2
+At the Hermes-facing layer, Argus includes both a **local MCP tool surface** and a **Hermes plugin module**. The MCP surface registers tools for recent-note summaries, event expansion, timeline search, workflow-pattern search, scope pause, scope forget, and session-brief export. The stdio adapter implements a minimal MCP-compatible JSON-RPC dispatcher with `initialize`, `tools/list`, and `tools/call`. The Hermes plugin module wires `pre_llm_call` to `sensor_get_recent_notes` and `pre_tool_call` to event-expansion policy checks. citeturn32view0turn32view1turn32view4turn32view5turn38view3turn38view4turn38view5turn28view1turn28view2
 
 ### Argus modules mapped to Hermes integration hooks
 
@@ -57,31 +57,31 @@ At the Hermes-facing layer, Argus includes both a **local MCP tool surface** and
 |---|---|---|---|
 | `events.py` | Canonical event envelope and metadata contract | Input schema for all sensors | Keep this as the single sensor contract; do not invent per-sensor one-off payloads. citeturn27view1turn27view5 |
 | `event_gateway.py` | Loopback HTTP ingest, local persist, Redis publish, operator controls | Sensor ingress before Hermes sees anything | Make this the one local ingest endpoint for every sensor emitter. citeturn40view0 |
-| `native_messaging.py` | Converts browser page context into Argus events and posts to gateway | Browser and website sensors | Reuse this pattern for browser/page sensors; add analogous local emitters for app focus and file events. citeturn40view5turn40view0 |
-| `streams.py` | Redis stream routing, consumer-group helpers, DLQ | Optional async bus behind gateway | Keep optional for scale-out; skip initially if a single-machine install is enough. citeturn41view1 |
-| `storage_worker.py` | Reads Redis Streams and writes to SQLite | Batch or fan-out persistence | Use only when you want asynchronous workers or multiple downstream processors. citeturn41view0 |
+| `native_messaging.py` | Converts browser page context into Argus events and posts to gateway | Browser and website sensors | Reuse this pattern for browser/page sensors; the macOS app-focus and focused-field MVP paths already follow the same gateway model, while file-specific emitters remain later work. citeturn40view5turn40view0 |
+| `streams.py` | Redis stream routing, consumer-group helpers, DLQ | Live local bus behind gateway | Keep Redis loopback-bound for the current live stack; SQLite remains the durable truth store. citeturn41view1 |
+| `storage_worker.py` | Reads Redis Streams and writes to SQLite | Batch or fan-out persistence | Run with the live local stack when you want gateway -> Redis -> SQLite fan-out; the no-external-service smoke path is for isolated verification. citeturn41view0 |
 | `sqlite_store.py` | Timeline store, FTS5 search, ambient summaries, audit persistence | Backing store for plugin and MCP tools | Make SQLite the first source of truth for local deployment. citeturn40view4turn32view3 |
 | `retrieval.py` | Note index and optional LanceDB-backed search | Rich retrieval behind MCP tools | Use when timeline search becomes too weak or you want semantic lookup. citeturn38view0turn32view3 |
 | `graph.py` | Optional Neo4j pattern lookup | `sensor_find_workflow_patterns` backend | Leave optional until workflow-pattern mining matters. citeturn31view6turn38view1 |
 | `mcp.py` | Local Argus tool registry and policy-gated lookup | Tool surface consumed by Hermes MCP client | This should remain the authoritative detail-on-demand layer. citeturn32view0turn32view1turn34view0 |
 | `mcp_stdio.py` | Minimal stdio MCP adapter with tool schemas | Hermes `mcp_servers.<name>.command` | This is the correct way to expose Argus to Hermes as external tools. citeturn38view0turn38view3turn38view4turn39view0 |
-| `hermes_plugin.py` | Ambient context injection and raw-access gating | `pre_llm_call`, `pre_tool_call` | Keep this, but fix compatibility with latest Hermes plugin packaging and veto shape. citeturn28view1turn28view2turn29view0turn15view0turn16view2 |
+| `hermes_plugin.py` | Ambient context injection and raw-access gating | `pre_llm_call`, `pre_tool_call` | Compatibility is fixed for package metadata and veto shape; confirm runtime enablement with `hermes plugins list`. citeturn28view1turn28view2turn29view0turn15view0turn16view2 |
 
-### Critical compatibility findings
+### Current compatibility state
 
-The Argus direction is right, but the latest Hermes docs suggest two changes before you rely on the current plugin path in production.
+The Argus direction is right, and the latest Hermes compatibility edges are now handled in the repo.
 
-Argus currently declares `ENTRY_POINT_GROUP = "hermes.plugins"` in `hermes_plugin.py`, while the current official Hermes plugin guide documents pip entry points under `[project.entry-points."hermes_agent.plugins"]`. If you plan to distribute Argus as a pip-installed Hermes plugin, I would change Argus to the documented group name or provide both groups during a transition. citeturn29view0turn15view0turn18view4
+Argus publishes `[project.entry-points."hermes_agent.plugins"]` for current Hermes plugin discovery and keeps `[project.entry-points."hermes.plugins"]` for legacy compatibility. The runtime plugin loader should therefore be checked with `hermes plugins list`; if `argus` is not visible there, the package is not installed into the Python environment Hermes scans. citeturn29view0turn15view0turn18view4
 
-Argus also returns `{"block": True, "reason": ...}` from `pre_tool_call`, while the Hermes hook docs document the Python-plugin veto shape as `{"action": "block", "message": ...}`. The safest move is to update Argus to the documented shape rather than bet on undocumented normalization. citeturn28view2turn16view2
+Argus also returns `{"action": "block", "message": ...}` from `pre_tool_call`, which matches the documented Hermes hook veto shape. citeturn28view2turn16view2
 
 ## Recommended integration architecture
 
 The recommended design is **not** “inject everything into Hermes.” It is:
 
 - **All sensors** emit typed Argus event envelopes to a **local loopback gateway**.
-- Argus writes those events to a **local timeline store** and, only if needed, pushes them through **Redis Streams** for workers.
-- Hermes loads an **Argus plugin** that injects only a **short recent ambient summary** via `pre_llm_call`.
+- Argus writes those events to a **local timeline store** and publishes them through loopback **Redis Streams** in the live local stack.
+- Hermes can load an **Argus plugin** that injects only a **short recent ambient summary** via `pre_llm_call`, after plugin discovery is confirmed in the active Hermes runtime.
 - Hermes connects to an **Argus stdio MCP server** for on-demand lookup, redacted event expansion, timeline search, workflow patterns, pause, forget, and session-brief export.
 - Raw expansion remains **policy gated**, audited, and keyed by `event_id`. citeturn27view2turn27view3turn40view0turn32view0turn32view1turn34view0turn38view3turn38view4
 
@@ -107,7 +107,7 @@ flowchart LR
   subgraph Argus Local Plane
     G[Loopback Event Gateway]
     S[(SQLite timeline and audit)]
-    R[(Optional Redis Streams)]
+    R[(Redis Streams)]
     N[(Optional LanceDB notes)]
     X[Argus MCP stdio server]
     K[Argus Hermes plugin]
@@ -155,9 +155,9 @@ The only design I would seriously consider instead is **a memory-provider plugin
 
 ## Implementation blueprint
 
-### Fix the Hermes compatibility edges in Argus first
+### Keep the Hermes compatibility edges locked down
 
-Before anything else, make two changes in the Argus Hermes plugin package:
+Argus now carries the two required Hermes plugin compatibility details:
 
 ```python
 # package metadata
@@ -170,20 +170,29 @@ argus = "argus_services.hermes_plugin:register"
 return {"action": "block", "message": decision.reason}
 ```
 
-That aligns the package with the current official plugin discovery and hook contract. citeturn15view0turn16view2turn29view0
+That aligns the package with the current official plugin discovery and hook contract. Keep tests around both details so future setup changes do not drift. citeturn15view0turn16view2turn29view0
 
 ### Normalize all sensors onto the single Argus envelope
 
 Every sensor should emit the Argus envelope and go through the loopback gateway. Do not build separate direct-to-Hermes sensor adapters for browser activity, app focus, light-switch events, and phone summaries. The event gateway already gives you one ingest path, one store, one metrics surface, and one policy boundary. citeturn27view1turn40view0
 
-A good event shape for computer and phone activity looks like this:
+A good complete event envelope for computer and phone activity looks like this:
 
 ```json
 {
+  "event_id": "018f4f3c-8d2a-7a51-9c45-8d1f6a3d5e91",
   "event_type": "activity.app_focus",
+  "schema_version": "2026-05-11",
   "source_device_id": "macbook-pro",
   "source_platform": "macos",
   "sensor_id": "frontmost_app_sensor",
+  "sensor_version": "0.1.0",
+  "observed_at": "2026-05-13T20:47:18Z",
+  "ingested_at": "2026-05-13T20:47:19Z",
+  "session_id": "sess-local-1",
+  "dedupe_key": "macbook-pro:frontmost:com.apple.Safari:2026-05-13T20:47",
+  "sensitivity": "low",
+  "raw_scope": "ephemeral",
   "payload": {
     "app": {
       "bundle_id": "com.apple.Safari",
@@ -194,9 +203,8 @@ A good event shape for computer and phone activity looks like this:
     },
     "reason": "frontmost_changed"
   },
-  "observed_at": "2026-05-13T20:47:18Z",
-  "raw_scope": "ephemeral",
-  "sensitivity": "low",
+  "redactions": [],
+  "relationships": [],
   "tags": ["macos", "focus"]
 }
 ```
@@ -215,14 +223,14 @@ def emit_argus_event(event: dict) -> None:
 
 That endpoint and local-gateway flow are already what Argus implements. citeturn40view0
 
-### Keep Redis optional on day one
+### Use Redis in the live local stack and SQLite as durable truth
 
-For a first deployment on one person’s machine, you do not need Redis Streams unless you really want asynchronous workers or fan-out. The gateway already stores locally and already exposes what Hermes needs. Redis and the storage worker become useful when you add perception workers, enrichment, multi-process indexing, or a dead-letter workflow. citeturn40view0turn41view0turn41view1
+For the current Argus live path, start Redis with the local mesh. The gateway stores locally and publishes to Redis before returning success, and the storage worker consumes Redis Streams into SQLite. SQLite remains the durable truth store and audit store; Redis is the loopback-bound staging and replay layer. The no-external-service MVP smoke still exists for isolated verification, but the current live gateway path expects Redis unless a documented no-op or sync publisher mode is added. citeturn40view0turn41view0turn41view1
 
 My recommendation is:
 
-- **Day one**: sensors → gateway → SQLite → plugin/MCP.
-- **Later**: turn on Redis Streams and storage/perception workers for fan-out, analytics, or heavier processing. citeturn40view0turn41view0
+- **Live local MVP**: sensors → gateway → Redis Streams → storage worker → SQLite/audit → MCP/Hermes.
+- **Isolated smoke tests**: native host → in-process gateway/store → SQLite/audit → MCP raw gate, without requiring Docker services. citeturn40view0turn41view0
 
 ### Expose Argus to Hermes over stdio MCP
 
@@ -231,12 +239,12 @@ Configure Hermes to treat Argus as a local stdio MCP server. This keeps the deta
 ```yaml
 # ~/.hermes/config.yaml
 mcp_servers:
-  argus:
-    command: "python"
-    args: ["-m", "argus_services.mcp_stdio"]
+  argus-sensor:
+    command: "uv"
+    args: ["run", "argus-sensor-mcp"]
     env:
       ARGUS_TIMELINE_DB_PATH: "/Users/you/Library/Application Support/Argus/timeline.db"
-      ARGUS_LANCEDB_PATH: "/Users/you/Library/Application Support/Argus/lancedb"
+      ARGUS_LANCEDB_PATH: "/Users/you/Library/Application Support/Argus/notes.lancedb"
       ARGUS_APPROVAL_TOKEN: "replace-with-local-approval-token"
     tools:
       include:
@@ -250,6 +258,20 @@ mcp_servers:
       resources: false
       prompts: false
 ```
+
+The verified local CLI setup path is:
+
+```sh
+hermes mcp add argus-sensor \
+  --command uv \
+  --env "ARGUS_TIMELINE_DB_PATH=$ARGUS_TIMELINE_DB_PATH" \
+  --env "ARGUS_LANCEDB_PATH=$ARGUS_LANCEDB_PATH" \
+  --env "ARGUS_APPROVAL_TOKEN=$ARGUS_APPROVAL_TOKEN" \
+  --args run argus-sensor-mcp
+hermes mcp test argus-sensor
+```
+
+If Hermes asks whether to add the MCP server, answer `Y`.
 
 Once configured, Hermes will discover the tools at startup or after `/reload-mcp`. Remember that Hermes prefixes MCP tools with `mcp_<server>_<tool>` when registering them to the model, but include/exclude filters use the original MCP tool names. citeturn17view2turn17view7turn23view0turn38view3turn38view4
 
@@ -312,9 +334,11 @@ def register(ctx):
 
 That pattern keeps the injection cheap while still preventing accidental raw expansion. It also aligns the veto return value with the documented Hermes hook shape. citeturn16view2turn28view1turn28view2turn34view0
 
+The plugin package contract is tested today. Treat runtime hook injection as enabled only after `hermes plugins list` shows `argus` in the active Hermes runtime and `hermes plugins enable argus` succeeds. The MCP setup above is the primary live-verified path.
+
 ### Use the existing browser path as the template for websites and programs
 
-Argus’ existing browser path is the best concrete template in the repo for your website/program context injectors. A native message carrying `page_context` becomes an `activity.browser_page` event and is posted to the local gateway. Build your app-focus and focused-field sensors exactly the same way: local source → normalized envelope → local gateway. citeturn40view5turn40view0turn27view5
+Argus’ existing browser path is the best concrete template in the repo for your website/program context injectors. A native message carrying `page_context` becomes an `activity.browser_page` event and is posted to the local gateway. The macOS app-focus, focused-field, heartbeat, and ScreenCaptureKit/Vision OCR MVP paths now follow the same principle: local source → normalized envelope → local gateway. citeturn40view5turn40view0turn27view5
 
 ### Sequence of data flow
 
@@ -352,6 +376,24 @@ The strongest part of the current design is that both Hermes and Argus already s
 
 Argus already gives you the right privacy primitives for sensor data: event-level `sensitivity`, `raw_scope`, deterministic redaction, blocked surfaces, approval-token-gated raw access, and audit logging around tool access and purges. Use them aggressively. In practice that means: store enough structure to retrieve by `event_id`, but only inject summaries into Hermes; keep raw payloads either ephemeral or explicitly durable-by-policy; and make full expansion rare, audited, and user-approvable. citeturn27view1turn34view0turn32view1turn32view2turn33view3
 
+### Raw local events, sanitized outputs, and audit trail
+
+The current Argus dashboard should be read as three separate views of the same
+sensor system:
+
+- **Raw Local Events**: complete local event envelopes stored for operator
+  inspection and policy-gated retrieval.
+- **Sanitized Hermes Outputs**: redacted summaries, search matches, redacted
+  event expansions, and session briefs that are safe to send to Hermes by
+  default.
+- **Audit Trail**: every ingest, MCP-facing access, export, pause/resume, forget,
+  and raw-access decision with actor, tool, scope, event count, allow/block
+  status, redactions applied, and relevant sanitized or raw-local details.
+
+This split is important: raw data is visible to the local operator and audit
+system, but is not sent to AI unless the user intentionally requests and
+approves a policy-gated raw expansion.
+
 One subtle but important security point is tool exposure. Hermes’ MCP docs strongly emphasize per-server filtering and “the smallest useful surface.” Do that here. Give Hermes the search, summary, expand, pause, forget, and brief-export tools, but do not expose anything broader than necessary. citeturn17view1turn17view3
 
 ### Error-handling patterns
@@ -375,7 +417,8 @@ A practical validation sequence is:
 - emit a known browser page event;
 - verify it appears in SQLite;
 - call the Argus MCP `sensor_get_recent_notes`;
-- start Hermes and confirm `pre_llm_call` adds a short ambient summary;
+- run `hermes mcp add argus-sensor` and `hermes mcp test argus-sensor`;
+- after `hermes plugins list` shows `argus`, start Hermes and confirm `pre_llm_call` adds a short ambient summary;
 - ask Hermes something like “what have I been working on recently?” and confirm it answers from injected summary;
 - then ask Hermes to show details and confirm it reaches for the MCP search/expand tools rather than inventing them. citeturn32view1turn32view3turn13view4
 
@@ -383,13 +426,31 @@ A practical validation sequence is:
 
 Use this as the minimum deployment baseline:
 
-- Bind **Argus gateway**, **Redis** if enabled, and **Hermes API server** to loopback only. citeturn40view0turn13view5
+- Bind **Argus gateway**, **Redis**, and **Hermes API server** to loopback only. citeturn40view0turn13view5
 - Put sensor data into **one normalized envelope** and **one local ingress endpoint**. citeturn27view1turn40view0
 - Expose Argus to Hermes as a **local stdio MCP server** with a filtered tool list. citeturn17view0turn17view1turn38view3
 - Inject only a **short redacted summary** through `pre_llm_call`. citeturn16view2turn27view2
 - Make **raw expansion** explicitly gated and audited. citeturn34view0turn32view2
-- Fix the **plugin entry-point group** and **pre_tool_call veto shape** to match current Hermes docs. citeturn29view0turn15view0turn16view2
-- Keep Redis, LanceDB, and Neo4j **optional** until you actually need fan-out, semantic retrieval, or graph mining. citeturn41view0turn38view0turn31view6
+- Keep the **plugin entry-point group** and **pre_tool_call veto shape** matched to current Hermes docs. citeturn29view0turn15view0turn16view2
+- Keep LanceDB and Neo4j **optional** until you actually need semantic retrieval or graph mining; keep Redis as the live local replay/fan-out bus. citeturn41view0turn38view0turn31view6
+
+### Setup prompts and expected operator answers
+
+Use a staged setup so permissions and raw access stay intentional:
+
+- Export `ARGUS_TIMELINE_DB_PATH`, `ARGUS_LANCEDB_PATH`, and
+  `ARGUS_APPROVAL_TOKEN` before starting Argus services.
+- Run `uv pip install -e /Users/james/code/argus/argus` from the repo root.
+- Start the local mesh, gateway, and storage worker before using the live
+  gateway path.
+- When `hermes mcp add argus-sensor` asks to confirm adding the server, answer
+  `Y`.
+- Treat `hermes plugins list` as the source of truth for plugin hook
+  availability; do not claim hook injection is enabled until it lists `argus`.
+- When installing the browser native host, paste the exact
+  `chrome-extension://<extension-id>/` origin including the trailing slash.
+- On macOS, request Accessibility before structural focused-field collection and
+  request Screen Recording only when the OCR fallback is needed.
 
 ## Open questions and limitations
 
@@ -397,4 +458,4 @@ There are two limitations worth calling out clearly.
 
 The first is **Hermes version labeling**. In the official repo surfaces I reviewed, the repository page and the releases page appear to show inconsistent version labels around the March 28, 2026 stable line, while the docs site itself has pages updated through late April and early May 2026. Because of that, I treated the **current official docs site and current official repo docs** as the operative contract for extension surfaces, rather than trusting a single version label at face value. citeturn0search0turn21search0turn14search6turn14search10
 
-The second is **Argus completeness**. The repo already has the right architectural spine for Hermes integration, but some parts are more mature than others. The browser/native-messaging path, event gateway, SQLite store, MCP surface, and Hermes plugin skeleton are concrete; the broader cross-device perception pipeline described in the spec is still more aspirational than fully surfaced in the code paths I inspected. That does not weaken the recommended architecture; it just means you should treat “sensor collectors” as the area that still needs the most build-out. citeturn27view4turn8view0turn40view0turn38view0turn28view1
+The second is **Argus completeness**. The repo already has the right architectural spine for Hermes integration. The browser/native-messaging path, event gateway, SQLite store, MCP surface, plugin package, frontmost/focused-field macOS paths, runtime heartbeats, and ScreenCaptureKit/Vision OCR fallback are concrete. The broader cross-device and specialty collector pipeline still needs build-out: MailKit, EventKit, FSEvents, File Provider, Endpoint Security, Speech, DeviceActivity, HealthKit, WatchConnectivity, richer home/device events, fresh-install permission verification, and release signing/notarization remain next functional work. citeturn27view4turn8view0turn40view0turn38view0turn28view1

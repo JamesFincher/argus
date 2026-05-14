@@ -523,7 +523,7 @@ Do **not** stuff a rolling firehose of sensor notes into the system prompt. Inst
 
 That pattern fits Hermes’s tool usage model, keeps token budgets under control, and materially reduces duplicate context pollution. citeturn38view2turn38view5turn38view3
 
-### Minimal Hermes plugin skeleton
+### Minimal Hermes plugin example
 
 ```python
 # hermes_sensor_plugin/__init__.py
@@ -540,11 +540,12 @@ def register(ctx):
             )
         }
 
-    def block_unsafe_tool(tool_name=None, arguments=None, **kwargs):
-        if tool_name == "sensor_expand_event":
-            if arguments and arguments.get("raw_mode") == "full":
+    def block_unsafe_tool(tool_name=None, arguments=None, args=None, **kwargs):
+        params = arguments or args or {}
+        if tool_name in {"sensor_expand_event", "mcp_argus_sensor_expand_event"}:
+            if params.get("raw_mode") == "full":
                 # Example: require explicit per-call approval token
-                return {"block": True, "reason": "raw_mode requires approval token"}
+                return {"action": "block", "message": "raw_mode requires approval token"}
         return None
 
     ctx.register_hook("pre_llm_call", inject_sensor_context)
@@ -556,12 +557,27 @@ def register(ctx):
 ```yaml
 # ~/.hermes/config.yaml
 mcp_servers:
-  sensor:
-    command: "uvx"
-    args: ["hermes-sensor-mcp"]
+  argus-sensor:
+    command: "uv"
+    args: ["run", "argus-sensor-mcp"]
+    env:
+      ARGUS_TIMELINE_DB_PATH: "/Users/you/Library/Application Support/Argus/timeline.db"
+      ARGUS_LANCEDB_PATH: "/Users/you/Library/Application Support/Argus/notes.lancedb"
 ```
 
-Hermes’s MCP client discovers these at startup and auto-registers the tools. citeturn38view5
+Hermes’s MCP client discovers these at startup and auto-registers the tools.
+With the current local CLI, the verified setup path is:
+
+```sh
+hermes mcp add argus-sensor \
+  --command uv \
+  --env "ARGUS_TIMELINE_DB_PATH=$HOME/Library/Application Support/Argus/timeline.db" \
+  --args run argus-sensor-mcp
+hermes mcp test argus-sensor
+```
+
+If Hermes prompts to confirm adding the server, answer `Y`; the expected test
+result includes `sensor_get_recent_notes` and `sensor_expand_event`. citeturn38view5
 
 ## Deployment, Security, and Operations
 
@@ -932,7 +948,7 @@ Safari Web Extensions can message their containing app, which is the cleanest br
 })();
 ```
 
-### MailKit extension skeleton
+### MailKit extension example
 
 MailKit gives you Apple Mail-specific hooks for message actions and compose sessions; it is not a universal email API for every mail client. citeturn17search0turn17search1turn17search2
 

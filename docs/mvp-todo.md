@@ -69,7 +69,8 @@ Owner: parallel worker.
 Goal: Hermes can launch an Argus MCP server process and call tools without
 embedding Python objects in-process.
 
-Status: implemented with live Hermes/Gengar MCP add/test verification.
+Status: implemented with live Hermes/Gengar MCP add/test verification and
+operator setup docs in `README.md` plus `docs/hermes-setup.md`.
 
 Tasks:
 
@@ -93,7 +94,8 @@ Tasks:
   - optional LanceDB path
   - optional Neo4j feature flag
 - Add tests for request/response frames and tool calls.
-- Add README instructions for Hermes config.
+- Keep README and `docs/hermes-setup.md` in sync with verified Hermes CLI
+  commands.
 
 Done when:
 
@@ -108,17 +110,20 @@ Owner: local/integration after MCP worker.
 Goal: Hermes can discover the plugin through package metadata.
 
 Status: implemented for current `hermes_agent.plugins` metadata, legacy
-`hermes.plugins` compatibility, env-backed local store wiring, and documented
-Hermes hook veto shape; the live verifier checks package entry points before
-launching Hermes MCP tests.
+`hermes.plugins` compatibility, env-backed local store wiring, documented
+Hermes hook veto shape, and operator setup docs; the live verifier checks
+package entry points before launching Hermes MCP tests.
 
 Tasks:
 
-- Add a `hermes_agent.plugins` entry point if Hermes expects that group.
-- Add a safe plugin config path for approval token and store paths.
-- Ensure `register(ctx)` uses the same persistent store wiring as MCP.
-- Add tests that inspect package metadata or exported entry points.
-- Document install and rollback commands.
+- Keep both `hermes_agent.plugins` and legacy `hermes.plugins` entry points
+  packaged.
+- Keep the approval token and store path config surfaced through environment
+  variables.
+- Keep `register(ctx)` on the same persistent store wiring as MCP.
+- Keep metadata, hook, and runtime-verifier tests passing.
+- Keep `docs/hermes-setup.md` clear about install, enable, and rollback
+  expectations.
 
 Done when:
 
@@ -209,14 +214,14 @@ verification.
 
 Tasks:
 
-- Replace empty-observation skeleton with a real ScreenCaptureKit frame path.
+- Keep the real ScreenCaptureKit frame path covered by tests.
 - Keep `capturesAudio = false`.
-- Feed sampled frames into `VNRecognizeTextRequest`.
-- Build `ScreenOCRTextObservation` records with confidence.
-- Redact before summary and before gateway emission.
-- Rate-limit by `ScreenOCRPolicy.minimumFrameInterval`.
+- Keep sampled frames flowing into `VNRecognizeTextRequest`.
+- Keep `ScreenOCRTextObservation` records carrying confidence.
+- Keep redaction before summary and before gateway emission.
+- Keep rate limiting under `ScreenOCRPolicy.minimumFrameInterval`.
 - Do not run OCR when AX/browser signals cover the same scope.
-- Add a testable seam for Vision observations so policy/redaction can be verified
+- Keep the Vision-observation seam covered so policy/redaction can be verified
   without requiring live screen capture in unit tests.
 
 Done when:
@@ -278,17 +283,20 @@ Done when:
 
 Goal: Actual Hermes sees Argus tools and uses sanitized context.
 
-Status: implemented with `scripts/verify_hermes_runtime.py`; the verifier writes
-a local MCP config snippet, validates Argus package metadata, runs the Argus
-MCP stdio smoke, and exercises `hermes mcp add/test` in an isolated home.
+Status: MCP live verification is implemented with
+`scripts/verify_hermes_runtime.py`; the verifier writes a local MCP config
+snippet, validates Argus package metadata, runs the Argus MCP stdio smoke, and
+exercises `hermes mcp add/test` in an isolated home. Full enabled-plugin
+prompt verification remains until `hermes plugins list` shows `argus` in the
+active Hermes runtime.
 
 Tasks:
 
-- Install Argus package into the active Python environment.
-- Write Hermes MCP config for `argus-sensor-mcp`.
-- Register plugin entry point.
-- Launch Hermes with Argus config.
-- Verify tool discovery.
+- Keep Argus package installed in the active Python environment.
+- Keep Hermes MCP config for `argus-sensor-mcp` documented and verified.
+- Confirm the active Hermes plugin environment lists `argus`.
+- Launch Hermes with Argus MCP config.
+- Verify MCP tool discovery.
 - Verify a simple Hermes prompt can call `sensor_get_recent_notes`.
 - Verify `sensor_expand_event` full raw mode is blocked without approval.
 

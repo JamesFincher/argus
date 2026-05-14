@@ -28,6 +28,16 @@ REQUIRED_GROUPS = {
     "cg-ops",
 }
 
+REQUIRED_RETENTION = {
+    "stream:raw:macos": "24h",
+    "stream:raw:ios": "24h",
+    "stream:raw:watchos": "24h",
+    "stream:derived:notes": "30d",
+    "stream:policy:blocked": "30d",
+    "stream:system:metrics": "7d",
+    "stream:dlq": "30d",
+}
+
 REQUIRED_STORAGE_MARKERS = {
     "events",
     "event_fts",
@@ -66,6 +76,16 @@ def check_stream_manifest() -> list[str]:
     failures.extend(
         f"missing Redis consumer group: {group}"
         for group in sorted(REQUIRED_GROUPS - groups)
+    )
+    retention = {
+        stream.get("name"): stream.get("retention")
+        for stream in streams
+        if stream.get("name")
+    }
+    failures.extend(
+        f"Redis stream {name} retention is {retention.get(name)!r}, expected {expected!r}"
+        for name, expected in sorted(REQUIRED_RETENTION.items())
+        if retention.get(name) != expected
     )
     return failures
 

@@ -156,18 +156,22 @@ def test_redis_consumer_reclaims_retryable_and_dead_letters_exhausted_pending():
         [
             [
                 ["1778681743795-0", "worker-1", 60_000, 1],
-                ["1778681743796-0", "worker-1", 60_000, 3],
+                ["1778681743796-0", "worker-1", 60_000, 5],
             ],
             "1778681800000-0",
             1,
-            [["1778681743795-0", ["event_id", "evt-retry"]]],
+            [
+                "0-0",
+                [["1778681743795-0", ["event_id", "evt-retry"]]],
+                [],
+            ],
         ]
     )
     consumer = RedisStreamConsumer(
         "cg-perception",
         "worker-2",
         executor=executor,
-        max_attempts=3,
+        max_attempts=5,
     )
 
     reclaimed = consumer.reclaim_stale("stream:raw:macos", min_idle_ms=30_000)
@@ -193,12 +197,14 @@ def test_redis_consumer_reclaims_retryable_and_dead_letters_exhausted_pending():
     ]
     assert executor.commands[2] == ["XACK", "stream:raw:macos", "cg-perception", "1778681743796-0"]
     assert executor.commands[3] == [
-        "XCLAIM",
+        "XAUTOCLAIM",
         "stream:raw:macos",
         "cg-perception",
         "worker-2",
         "30000",
-        "1778681743795-0",
+        "0-0",
+        "COUNT",
+        "10",
     ]
 
 

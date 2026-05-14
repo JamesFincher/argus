@@ -17,6 +17,31 @@ def write_file(path: Path, text: str = "") -> None:
 def create_valid_scaffold(root: Path) -> None:
     write_file(root / "argus_spec.md", "# Spec\n")
     write_file(
+        root / "docs/hermes-setup.md",
+        "\n".join(
+            [
+                "hermes mcp add argus-sensor",
+                "hermes mcp test argus-sensor",
+                "ARGUS_TIMELINE_DB_PATH",
+                "hermes_agent.plugins:argus",
+                '{"action": "block", "message": "..."}',
+                "If `argus` does not appear",
+            ]
+        ),
+    )
+    write_file(
+        root / "docs/deep-research-alignment.md",
+        "\n".join(
+            [
+                "Hybrid local-first architecture",
+                "hermes_agent.plugins",
+                '{"action": "block", "message": "..."}',
+                "Redis-backed live-stack variant",
+                "plugin package contract is tested",
+            ]
+        ),
+    )
+    write_file(
         root / "docs/implementation-plan.md",
         "\n".join(
             [

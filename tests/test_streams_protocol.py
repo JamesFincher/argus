@@ -10,6 +10,7 @@ from argus_services.streams import (
     _read_resp,
     _read_resp_string,
     fields_from_pairs,
+    parse_xautoclaim,
     parse_xpending,
     parse_xreadgroup,
 )
@@ -113,7 +114,7 @@ def test_consumer_edge_paths_for_groups_ack_pending_reclaim_and_dlq():
             1,
         ]
     )
-    consumer = RedisStreamConsumer("cg", "worker", executor=executor, max_attempts=3)
+    consumer = RedisStreamConsumer("cg", "worker", executor=executor, max_attempts=5)
 
     with pytest.raises(RuntimeError, match="NOAUTH"):
         consumer.ensure_group("stream:raw:macos")
@@ -131,6 +132,7 @@ def test_consumer_defaults_to_publisher_executor():
     consumer = RedisStreamConsumer("cg", "worker", publisher=publisher)
 
     assert consumer.executor is publisher
+    assert consumer.max_attempts == 5
 
 
 def test_stream_parser_helpers_cover_empty_pairs_and_pending_rows():
@@ -141,4 +143,9 @@ def test_stream_parser_helpers_cover_empty_pairs_and_pending_rows():
     assert parse_xpending([["1-0", "worker", "42", "2"]]) == [
         {"redis_id": "1-0", "consumer": "worker", "idle_ms": 42, "delivery_count": 2}
     ]
+    assert parse_xautoclaim(
+        "stream:raw:macos",
+        ["0-0", [["1-0", ["event_id", "evt-auto"]]], []],
+    ) == [StreamMessage("stream:raw:macos", "1-0", {"event_id": "evt-auto"})]
+    assert parse_xautoclaim("stream:raw:macos", []) == []
     assert fields_from_pairs(["a", "b", "c", 3]) == {"a": "b", "c": "3"}

@@ -24,6 +24,16 @@ REQUIRED_GROUPS = {
     "cg-ops",
 }
 
+REQUIRED_RETENTION = {
+    "stream:raw:macos": "24h",
+    "stream:raw:ios": "24h",
+    "stream:raw:watchos": "24h",
+    "stream:derived:notes": "30d",
+    "stream:policy:blocked": "30d",
+    "stream:system:metrics": "7d",
+    "stream:dlq": "30d",
+}
+
 
 def read(path: str) -> str:
     return (ROOT / path).read_text(encoding="utf-8")
@@ -60,6 +70,7 @@ def test_redis_stream_manifest_matches_spec_names():
 
     assert REQUIRED_STREAMS <= names
     assert REQUIRED_GROUPS <= groups
+    assert {stream["name"]: stream["retention"] for stream in streams} == REQUIRED_RETENTION
 
 
 def test_storage_skeletons_include_timeline_search_and_graph_names():

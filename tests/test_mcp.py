@@ -278,3 +278,29 @@ def test_forget_scope_removes_embedding_notes():
     assert result["graph_nodes_removed"] == 0
     assert server.store.get(note.event_id) is None
     assert search["matches"] == []
+
+
+def test_operator_control_and_export_tools_are_audited_with_sanitized_details():
+    server = LocalMCPServer(policy=RedactionPolicy())
+    server.add_event(
+        make_event(
+            "perception.note",
+            {"summary": "Email alex@example.com about launch"},
+        )
+    )
+
+    pause = server.call_tool("sensor_pause_scope", scope="macos", actor="operator")
+    brief = server.call_tool("sensor_export_session_brief", limit=5, actor="operator")
+
+    assert pause == {"ok": True, "scope": "macos", "status": "pause_requested"}
+    assert brief["ok"] is True
+    assert "alex@example.com" not in brief["brief"]
+    records = server.audit_log.records[-2:]
+    assert records[0].tool == "sensor_pause_scope"
+    assert records[0].actor == "operator"
+    assert records[0].scope == "macos"
+    assert records[0].allowed is True
+    assert records[0].details == {"requested_scope": "macos"}
+    assert records[1].tool == "sensor_export_session_brief"
+    assert records[1].event_count == 1
+    assert records[1].details["sanitized_brief"].count("[REDACTED_EMAIL]") == 1

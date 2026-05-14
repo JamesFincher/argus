@@ -57,6 +57,10 @@ def test_hermes_hook_registration_and_behavior():
         "message": "raw access requires valid approval token",
     }
     assert allowed is None
+    assert result["server"].audit_log.records[-1].tool == "sensor_expand_event"
+    assert result["server"].audit_log.records[-1].scope == "full"
+    assert result["server"].audit_log.records[-1].allowed is False
+    assert result["server"].audit_log.records[-1].event_count == 1
 
 
 def test_hermes_pre_llm_context_records_audit_actor():
@@ -104,6 +108,21 @@ def test_hermes_pre_tool_blocks_sensitive_non_sensor_arguments_and_unknown_raw_e
         "message": "raw event expansion requires known event_id",
     }
     assert prefixed_unknown_raw == unknown_raw
+
+    audit = result["server"].audit_log.records
+    assert [record.tool for record in audit] == [
+        "shell",
+        "sensor_expand_event",
+        "mcp_argus_sensor_expand_event",
+    ]
+    assert audit[0].actor == "hermes"
+    assert audit[0].redactions_applied == ["bearer_token"]
+    assert audit[0].details["sanitized_arguments"] == {
+        "command": "export TOKEN=[REDACTED_BEARER_TOKEN]"
+    }
+    assert audit[1].scope == "full"
+    assert audit[1].event_count == 0
+    assert audit[1].allowed is False
 
 
 def test_hermes_plugin_entry_points_are_packaged_and_loadable():

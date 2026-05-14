@@ -28,6 +28,15 @@ EXPECTED_CONSOLE_SCRIPTS = {
 EXPECTED_PLUGIN_GROUPS = ("hermes_agent.plugins", "hermes.plugins")
 EXPECTED_PLUGIN_NAME = "argus"
 EXPECTED_PLUGIN_VALUE = "argus_services.hermes_plugin:register"
+EXPECTED_MCP_TOOLS = (
+    "sensor_get_recent_notes",
+    "sensor_expand_event",
+    "sensor_timeline_search",
+    "sensor_find_workflow_patterns",
+    "sensor_pause_scope",
+    "sensor_forget_scope",
+    "sensor_export_session_brief",
+)
 
 
 @dataclass(frozen=True)
@@ -210,8 +219,11 @@ def run_direct_mcp_smoke(timeline_db_path: Path) -> tuple[list[str], bool]:
         for tool in tools_response.get("result", {}).get("tools", [])
         if isinstance(tool, dict) and isinstance(tool.get("name"), str)
     ]
-    if "sensor_get_recent_notes" not in tools or "sensor_expand_event" not in tools:
-        raise RuntimeError(f"Argus MCP tools missing expected sensor tools: {tools}")
+    missing_tools = sorted(set(EXPECTED_MCP_TOOLS) - set(tools))
+    if missing_tools:
+        raise RuntimeError(
+            f"Argus MCP tools missing expected sensor tools: {missing_tools}; got {tools}"
+        )
 
     raw_response = call_stdio_mcp(
         {

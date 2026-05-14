@@ -7,7 +7,7 @@ from importlib import metadata
 import os
 from typing import Any
 
-from .audit import InMemoryAuditLog
+from .audit import AuditRecord, InMemoryAuditLog
 from .mcp import LocalMCPServer
 from .mcp_stdio import local_mcp_server_from_env
 from .policy import RedactionPolicy
@@ -154,12 +154,40 @@ def register(
     def pre_tool_call(
         tool_name: str | None = None,
         arguments: dict[str, Any] | None = None,
-        **_: Any,
+        **kwargs: Any,
     ) -> dict[str, Any] | None:
         arguments = arguments or {}
+        actor = str(kwargs.get("session_id") or kwargs.get("actor") or "hermes")
+
+        def record_block(
+            reason: str,
+            *,
+            scope: str = "pre_tool_call",
+            event_count: int = 0,
+            redactions_applied: list[str] | None = None,
+            details: dict[str, Any] | None = None,
+        ) -> None:
+            server.audit_log.record(
+                AuditRecord(
+                    actor=actor,
+                    tool=tool_name or "unknown_tool",
+                    scope=scope,
+                    event_count=event_count,
+                    redactions_applied=redactions_applied or [],
+                    allowed=False,
+                    reason=reason,
+                    details=details or {},
+                )
+            )
+
         if not _is_sensor_expand_tool(tool_name):
             scan = effective_policy.redact_value(arguments)
             if scan.sensitivity in {"high", "blocked"}:
+                record_block(
+                    "tool arguments contain raw sensitive material",
+                    redactions_applied=[redaction.kind for redaction in scan.redactions],
+                    details={"sanitized_arguments": scan.value},
+                )
                 return _block("tool arguments contain raw sensitive material")
             return None
 
@@ -167,6 +195,11 @@ def register(
             event_id = arguments.get("event_id")
             event = server.store.get(event_id) if isinstance(event_id, str) else None
             if event is None:
+                record_block(
+                    "raw event expansion requires known event_id",
+                    scope="full",
+                    details={"event_id": event_id, "raw_mode": "full"},
+                )
                 return _block("raw event expansion requires known event_id")
             decision = effective_policy.evaluate_raw_access(
                 event,
@@ -174,6 +207,16 @@ def register(
                 raw_mode="full",
             )
             if not decision.allowed:
+                record_block(
+                    decision.reason,
+                    scope="full",
+                    event_count=1,
+                    details={
+                        "event_id": event_id,
+                        "raw_mode": "full",
+                        "sensitivity": decision.sensitivity,
+                    },
+                )
                 return _block(decision.reason)
         return None
 

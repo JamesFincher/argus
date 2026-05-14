@@ -128,7 +128,7 @@ class RedisStreamConsumer:
     consumer_name: str
     executor: RedisCommandExecutor | None = None
     publisher: RedisStreamPublisher | None = None
-    max_attempts: int = 3
+    max_attempts: int = 5
 
     def __post_init__(self) -> None:
         if self.executor is None:
@@ -211,18 +211,17 @@ class RedisStreamConsumer:
         assert self.executor is not None
         response = self.executor.execute(
             [
-                "XCLAIM",
+                "XAUTOCLAIM",
                 stream,
                 self.group,
                 self.consumer_name,
                 str(min_idle_ms),
-                *retry_ids,
+                "0-0",
+                "COUNT",
+                str(count),
             ]
         )
-        return [
-            StreamMessage(stream=stream, redis_id=redis_id, fields=fields_from_pairs(pairs))
-            for redis_id, pairs in response
-        ]
+        return parse_xautoclaim(stream, response)
 
     def dead_letter(self, stream: str, *redis_ids: str, reason: str) -> list[str]:
         if not redis_ids:
@@ -285,6 +284,16 @@ def parse_xpending(response: Any) -> list[dict[str, Any]]:
             "delivery_count": int(item[3]),
         }
         for item in response or []
+    ]
+
+
+def parse_xautoclaim(stream: str, response: Any) -> list[StreamMessage]:
+    if response in (None, []):
+        return []
+    entries = response[1] if isinstance(response, list) and len(response) > 1 else []
+    return [
+        StreamMessage(stream=stream, redis_id=redis_id, fields=fields_from_pairs(pairs))
+        for redis_id, pairs in entries
     ]
 
 
