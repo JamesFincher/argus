@@ -9,7 +9,8 @@ uv run python scripts/verify_hermes_runtime.py
 The verifier checks that:
 
 - a local `hermes` command is available;
-- Argus console scripts and the `hermes.plugins:argus` entry point are packaged;
+- Argus console scripts plus `hermes_agent.plugins:argus` and legacy
+  `hermes.plugins:argus` entry points are packaged;
 - `uv run argus-sensor-mcp` exposes the expected MCP tools;
 - full raw event expansion is blocked without approval;
 - Hermes can add and test the Argus MCP server from an isolated temporary

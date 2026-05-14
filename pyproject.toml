@@ -19,6 +19,9 @@ argus-mvp-smoke = "argus_services.mvp_smoke:main"
 [project.entry-points."hermes.plugins"]
 argus = "argus_services.hermes_plugin:register"
 
+[project.entry-points."hermes_agent.plugins"]
+argus = "argus_services.hermes_plugin:register"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["services"]

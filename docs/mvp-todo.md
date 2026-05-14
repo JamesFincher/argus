@@ -32,8 +32,9 @@ Done:
 - MCP-style in-process tool surface exposes required sensor tools.
 - MCP stdio transport exposes the same tool surface through console scripts:
   `argus-mcp-stdio`, `argus-sensor-mcp`, and `hermes-sensor-mcp`.
-- Hermes plugin entry point is packaged under `hermes.plugins`, uses env-backed
-  local stores by default, and enforces pre-LLM/pre-tool policies in tests.
+- Hermes plugin entry points are packaged under `hermes_agent.plugins` and the
+  legacy `hermes.plugins` group, use env-backed local stores by default, and
+  enforce pre-LLM/pre-tool policies in tests.
 - Swift Argus Core has canonical gateway envelope, UUIDv7 IDs, privacy filtering,
   local buffer/spool, loopback gateway sink, permission models, and OCR policy.
 - macOS app can manually capture frontmost window/focused-field events when
@@ -106,8 +107,10 @@ Owner: local/integration after MCP worker.
 
 Goal: Hermes can discover the plugin through package metadata.
 
-Status: implemented for package metadata and env-backed local store wiring; the
-live verifier now checks package entry points before launching Hermes MCP tests.
+Status: implemented for current `hermes_agent.plugins` metadata, legacy
+`hermes.plugins` compatibility, env-backed local store wiring, and documented
+Hermes hook veto shape; the live verifier checks package entry points before
+launching Hermes MCP tests.
 
 Tasks:
 

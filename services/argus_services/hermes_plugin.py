@@ -13,8 +13,11 @@ from .mcp_stdio import local_mcp_server_from_env
 from .policy import RedactionPolicy
 from .store import InMemoryEventStore
 
-ENTRY_POINT_GROUP = "hermes.plugins"
+ENTRY_POINT_GROUP = "hermes_agent.plugins"
+LEGACY_ENTRY_POINT_GROUP = "hermes.plugins"
+ENTRY_POINT_GROUPS = (ENTRY_POINT_GROUP, LEGACY_ENTRY_POINT_GROUP)
 ENTRY_POINT_NAME = "argus"
+ENTRY_POINT_VALUE = "argus_services.hermes_plugin:register"
 
 
 @dataclass(frozen=True)
@@ -73,17 +76,21 @@ def discover_plugins(group: str = ENTRY_POINT_GROUP) -> list[HermesPluginDescrip
 def load_plugin(
     name: str = ENTRY_POINT_NAME,
     *,
-    group: str = ENTRY_POINT_GROUP,
+    group: str | None = None,
 ) -> Any:
     """Load a Hermes plugin hook registrar from package entry point metadata."""
 
-    matches = [
-        entry_point
-        for entry_point in metadata.entry_points().select(group=group, name=name)
-    ]
-    if not matches:
-        raise LookupError(f"Hermes plugin entry point not found: {group}:{name}")
-    return matches[0].load()
+    entry_points = metadata.entry_points()
+    groups = (group,) if group is not None else ENTRY_POINT_GROUPS
+    for candidate_group in groups:
+        matches = [
+            entry_point
+            for entry_point in entry_points.select(group=candidate_group, name=name)
+        ]
+        if matches:
+            return matches[0].load()
+    searched = ", ".join(f"{candidate_group}:{name}" for candidate_group in groups)
+    raise LookupError(f"Hermes plugin entry point not found: {searched}")
 
 
 def plugin_metadata(config: HermesPluginConfig | None = None) -> dict[str, Any]:
@@ -93,9 +100,20 @@ def plugin_metadata(config: HermesPluginConfig | None = None) -> dict[str, Any]:
     return {
         "name": ENTRY_POINT_NAME,
         "entry_point_group": ENTRY_POINT_GROUP,
-        "entry_point": "argus_services.hermes_plugin:register",
+        "entry_point_groups": list(ENTRY_POINT_GROUPS),
+        "entry_point": ENTRY_POINT_VALUE,
         "env": effective_config.to_hermes_env(),
     }
+
+
+def _block(message: str) -> dict[str, str]:
+    return {"action": "block", "message": message}
+
+
+def _is_sensor_expand_tool(tool_name: str | None) -> bool:
+    if tool_name == "sensor_expand_event":
+        return True
+    return bool(tool_name and tool_name.endswith("_sensor_expand_event"))
 
 
 def register(
@@ -139,27 +157,24 @@ def register(
         **_: Any,
     ) -> dict[str, Any] | None:
         arguments = arguments or {}
-        if tool_name != "sensor_expand_event":
+        if not _is_sensor_expand_tool(tool_name):
             scan = effective_policy.redact_value(arguments)
             if scan.sensitivity in {"high", "blocked"}:
-                return {
-                    "block": True,
-                    "reason": "tool arguments contain raw sensitive material",
-                }
+                return _block("tool arguments contain raw sensitive material")
             return None
 
         if arguments.get("raw_mode") == "full":
             event_id = arguments.get("event_id")
             event = server.store.get(event_id) if isinstance(event_id, str) else None
             if event is None:
-                return {"block": True, "reason": "raw event expansion requires known event_id"}
+                return _block("raw event expansion requires known event_id")
             decision = effective_policy.evaluate_raw_access(
                 event,
                 approval_token=arguments.get("approval_token"),
                 raw_mode="full",
             )
             if not decision.allowed:
-                return {"block": True, "reason": decision.reason}
+                return _block(decision.reason)
         return None
 
     ctx.register_hook("pre_llm_call", pre_llm_call)

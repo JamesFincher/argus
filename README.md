@@ -148,8 +148,12 @@ raw expansion without approval.
 
 ## Hermes Plugin
 
-Argus also packages a Hermes plugin entry point for hook-based discovery:
-`hermes.plugins:argus = argus_services.hermes_plugin:register`.
+Argus packages Hermes plugin entry points for hook-based discovery. The current
+documented group is `hermes_agent.plugins`; the legacy `hermes.plugins` group is
+also published for compatibility:
+
+- `hermes_agent.plugins:argus = argus_services.hermes_plugin:register`
+- `hermes.plugins:argus = argus_services.hermes_plugin:register`
 
 Install the package into the Python environment Hermes scans for plugins:
 
@@ -162,7 +166,8 @@ where `ctx` provides `register_hook(name, handler)`. The plugin registers:
 
 - `pre_llm_call`: injects `sensor_get_recent_notes` sanitized ambient context.
 - `pre_tool_call`: blocks sensitive non-sensor tool arguments and gates full raw
-  `sensor_expand_event` access.
+  `sensor_expand_event` access with Hermes' documented
+  `{"action": "block", "message": "..."}` veto shape.
 
 Use the same persistence environment as the MCP stdio transport so both
 integrations read and audit against the same local stores:

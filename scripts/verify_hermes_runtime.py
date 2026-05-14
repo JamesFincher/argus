@@ -25,7 +25,9 @@ EXPECTED_CONSOLE_SCRIPTS = {
     "argus-sensor-mcp": "argus_services.mcp_stdio:main",
     "hermes-sensor-mcp": "argus_services.mcp_stdio:main",
 }
-EXPECTED_PLUGIN = ("hermes.plugins", "argus", "argus_services.hermes_plugin:register")
+EXPECTED_PLUGIN_GROUPS = ("hermes_agent.plugins", "hermes.plugins")
+EXPECTED_PLUGIN_NAME = "argus"
+EXPECTED_PLUGIN_VALUE = "argus_services.hermes_plugin:register"
 
 
 @dataclass(frozen=True)
@@ -86,13 +88,20 @@ def validate_entry_points() -> None:
     if missing_scripts:
         raise RuntimeError(f"Argus console script entry points are missing: {missing_scripts}")
 
-    group, name, value = EXPECTED_PLUGIN
-    plugins = {
-        entry_point.name: entry_point.value
-        for entry_point in entry_points.select(group=group)
-    }
-    if plugins.get(name) != value:
-        raise RuntimeError(f"Argus Hermes plugin entry point is missing: {group}:{name}={value}")
+    missing_plugin_groups: list[str] = []
+    for group in EXPECTED_PLUGIN_GROUPS:
+        plugins = {
+            entry_point.name: entry_point.value
+            for entry_point in entry_points.select(group=group)
+        }
+        if plugins.get(EXPECTED_PLUGIN_NAME) != EXPECTED_PLUGIN_VALUE:
+            missing_plugin_groups.append(group)
+    if missing_plugin_groups:
+        expected = ", ".join(
+            f"{group}:{EXPECTED_PLUGIN_NAME}={EXPECTED_PLUGIN_VALUE}"
+            for group in missing_plugin_groups
+        )
+        raise RuntimeError(f"Argus Hermes plugin entry points are missing: {expected}")
 
 
 def mcp_config_snippet(timeline_db_path: Path) -> str:

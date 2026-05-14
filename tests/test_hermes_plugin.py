@@ -1,7 +1,9 @@
 from argus_services.events import make_event
 from argus_services.hermes_plugin import (
     ENTRY_POINT_GROUP,
+    ENTRY_POINT_GROUPS,
     ENTRY_POINT_NAME,
+    LEGACY_ENTRY_POINT_GROUP,
     HermesPluginConfig,
     discover_plugins,
     load_plugin,
@@ -50,7 +52,10 @@ def test_hermes_hook_registration_and_behavior():
         arguments={"event_id": event.event_id, "raw_mode": "full", "approval_token": "ok"},
     )
 
-    assert blocked["block"] is True
+    assert blocked == {
+        "action": "block",
+        "message": "raw access requires valid approval token",
+    }
     assert allowed is None
 
 
@@ -83,27 +88,39 @@ def test_hermes_pre_tool_blocks_sensitive_non_sensor_arguments_and_unknown_raw_e
         tool_name="sensor_expand_event",
         arguments={"event_id": "missing", "raw_mode": "full", "approval_token": "ok"},
     )
+    prefixed_unknown_raw = ctx.hooks["pre_tool_call"](
+        tool_name="mcp_argus_sensor_expand_event",
+        arguments={"event_id": "missing", "raw_mode": "full", "approval_token": "ok"},
+    )
 
     assert result["policy"].approval_token == "ok"
     assert blocked_args == {
-        "block": True,
-        "reason": "tool arguments contain raw sensitive material",
+        "action": "block",
+        "message": "tool arguments contain raw sensitive material",
     }
     assert safe_args is None
     assert unknown_raw == {
-        "block": True,
-        "reason": "raw event expansion requires known event_id",
+        "action": "block",
+        "message": "raw event expansion requires known event_id",
     }
+    assert prefixed_unknown_raw == unknown_raw
 
 
-def test_hermes_plugin_entry_point_is_packaged_and_loadable():
+def test_hermes_plugin_entry_points_are_packaged_and_loadable():
     descriptors = discover_plugins()
     argus_descriptor = next(
         descriptor for descriptor in descriptors if descriptor.name == ENTRY_POINT_NAME
     )
+    legacy_descriptor = next(
+        descriptor
+        for descriptor in discover_plugins(group=LEGACY_ENTRY_POINT_GROUP)
+        if descriptor.name == ENTRY_POINT_NAME
+    )
 
     assert argus_descriptor.group == ENTRY_POINT_GROUP
     assert argus_descriptor.value == "argus_services.hermes_plugin:register"
+    assert legacy_descriptor.group == LEGACY_ENTRY_POINT_GROUP
+    assert legacy_descriptor.value == "argus_services.hermes_plugin:register"
     assert argus_descriptor.to_dict() == {
         "name": ENTRY_POINT_NAME,
         "group": ENTRY_POINT_GROUP,
@@ -116,6 +133,7 @@ def test_hermes_load_plugin_reports_missing_entry_point():
     try:
         load_plugin(name="missing-argus-plugin")
     except LookupError as exc:
+        assert "hermes_agent.plugins:missing-argus-plugin" in str(exc)
         assert "hermes.plugins:missing-argus-plugin" in str(exc)
     else:
         raise AssertionError("missing plugin entry point should raise")
@@ -131,7 +149,8 @@ def test_hermes_plugin_metadata_exposes_runtime_config(monkeypatch, tmp_path):
     metadata = plugin_metadata(config)
 
     assert metadata["name"] == "argus"
-    assert metadata["entry_point_group"] == "hermes.plugins"
+    assert metadata["entry_point_group"] == "hermes_agent.plugins"
+    assert metadata["entry_point_groups"] == list(ENTRY_POINT_GROUPS)
     assert metadata["entry_point"] == "argus_services.hermes_plugin:register"
     assert metadata["env"] == {
         "ARGUS_TIMELINE_DB_PATH": str(db_path),
